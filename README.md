@@ -28,7 +28,7 @@ This app vendors a tested snapshot of the three SDK source files. Future protoco
 
 [Download Home Assistant AI 1.0.0 (.pbw)](https://github.com/ericlmccormick/Pebble-Home-Assistant-AI/releases/download/v1.0.0/home-assistant-ai-v1.0.0.pbw)
 
-[Home Assistant Bridge plugin releases and PBW files](https://github.com/ericlmccormick/Pebble-HA-plug-in/releases)
+[Download Home Assistant Bridge v1.0.1 (.pbw)](https://github.com/ericlmccormick/Pebble-HA-plug-in/releases/download/v1.0.1/home-assistant-bridge-v1.0.1.pbw)
 
 [View the app release and build workflow](https://github.com/ericlmccormick/Pebble-Home-Assistant-AI/actions/workflows/release-v1.yml)
 
