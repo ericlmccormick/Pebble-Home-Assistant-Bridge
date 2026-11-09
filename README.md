@@ -4,9 +4,9 @@ Home Assistant AI is a Pebble watch interface for Home Assistant Assist, powered
 
 ## Required installation
 
-1. Install and configure **[Home Assistant Bridge](https://github.com/ericlmccormick/Pebble-HA-plug-in)** v1.0.0 in the Pebble mobile app.
+1. Install and configure **[Home Assistant Bridge](https://github.com/ericlmccormick/Pebble-HA-plug-in)** v1.0.1 in the Pebble mobile app.
 2. In **Bridge settings**, enter the Home Assistant HTTPS URL and long-lived token, choose the default conversation agent and TTS engine, and verify the connection.
-3. Install **[Home Assistant AI](https://github.com/ericlmccormick/Pebble-Home-Assistant-AI)** v1.0.0. Allow its HomeConverse and InvokeAction plugin permissions.
+3. Install **[Home Assistant AI](https://github.com/ericlmccormick/Pebble-Home-Assistant-Bridge)** v1.0.0. Allow its HomeConverse and InvokeAction plugin permissions.
 4. Press **Select** to use PebbleOS dictation. Home Assistant's reply appears on the watch, with audio on Pebble watches that have speakers.
 5. In app Settings, configure audio on/off, automatic dictation submission, font size, vibration and optional conversation reset. Server credentials and TTS engine selection are managed **only in the Bridge**, not in this app.
 
@@ -28,7 +28,7 @@ This app vendors a tested snapshot of the three SDK source files. Future protoco
 
 [Download Home Assistant AI 1.0.0 (.pbw)](https://github.com/ericlmccormick/Pebble-Home-Assistant-AI/releases/download/v1.0.0/home-assistant-ai-v1.0.0.pbw)
 
-[Download Home Assistant Bridge 1.0.0 (.pbw)](https://github.com/ericlmccormick/Pebble-HA-plug-in/releases/download/v1.0.0/home-assistant-bridge-v1.0.0.pbw)
+[Home Assistant Bridge plugin releases and PBW files](https://github.com/ericlmccormick/Pebble-HA-plug-in/releases)
 
 [View the app release and build workflow](https://github.com/ericlmccormick/Pebble-Home-Assistant-AI/actions/workflows/release-v1.yml)
 
