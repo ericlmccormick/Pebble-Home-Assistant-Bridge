@@ -111,20 +111,6 @@ function valueBoolean(value,fallback){
 var clayConfig=[
   {type:'heading',defaultValue:'Home Assistant AI'},
   {type:'section',items:[
-    {type:'heading',defaultValue:'Home Assistant Bridge required'},
-    {type:'text',defaultValue:'Install and configure the Home Assistant Bridge plugin. This app uses the Bridge exclusively for conversations and speech; there is no direct connection or separate token.'},
-    {type:'toggle',messageKey:'ENABLE_TTS',label:'Speak responses on watch',
-      defaultValue:enableTts},
-    {type:'toggle',messageKey:'AUTO_SEND',label:'Send dictation without confirmation',
-      defaultValue:autoSend},
-    {type:'toggle',messageKey:'RESET_CHAT',label:'Start new conversation',
-      defaultValue:false}
-  ]},
-  {type:'section',items:[
-    {type:'heading',defaultValue:'Latest Bridge and watch audio diagnostics'},
-    {type:'text',id:'pcm_debug_display',defaultValue:'Ask Home Assistant a question and reopen Settings.'}
-  ]},
-  {type:'section',items:[
     {type:'heading',defaultValue:'Display'},
     {type:'select',messageKey:'FONT_CHOICE',label:'Text size',
       defaultValue:fontChoice,
@@ -132,48 +118,25 @@ var clayConfig=[
     {type:'select',messageKey:'THEME_MODE',label:'Theme',
       defaultValue:themeMode,
       options:[{label:'Day',value:'day'},{label:'Night',value:'night'},
-        {label:'Auto (Weather+ sunrise/sunset)',value:'auto'}]},
-    {type:'text',defaultValue:'Auto requires Weather+ installed. Without solar times, the last known appearance is retained.'},
+        {label:'Auto (Weather+)',value:'auto'}]},
     {type:'select',messageKey:'HAPTIC_LEVEL',label:'Vibration feedback',
       defaultValue:hapticLevel,
-      options:[{label:'Off',value:'off'},{label:'Low - short',value:'low'},
-        {label:'Medium - double',value:'medium'},{label:'High - long',value:'high'}]}
+      options:[{label:'Off',value:'off'},{label:'Low',value:'low'},
+        {label:'Medium',value:'medium'},{label:'High',value:'high'}]}
+  ]},
+  {type:'section',items:[
+    {type:'heading',defaultValue:'Home Assistant Bridge'},
+    {type:'text',defaultValue:'Requires the Home Assistant Bridge plugin to be installed and configured.'},
+    {type:'toggle',messageKey:'ENABLE_TTS',label:'Speak responses',
+      defaultValue:enableTts},
+    {type:'toggle',messageKey:'AUTO_SEND',label:'Send dictation automatically',
+      defaultValue:autoSend},
+    {type:'toggle',messageKey:'RESET_CHAT',label:'Start new conversation',
+      defaultValue:false}
   ]},
   {type:'submit',defaultValue:'Save Settings'}
 ];
 var clay=new Clay(clayConfig,null,{autoHandleEvents:false});
-function diagnosticsText(){
-  var d=audio.diagnostics(),watch=null;
-  try{watch=JSON.parse(localStorage.getItem('HA_AUDIO_LIBRARY_DIAG_V1_WATCH')||'null');}catch(e){}
-  var lines=['Connection: Home Assistant Bridge plugin'];
-  if(!d)lines.push('No TTS request recorded yet.');
-  else {
-    lines.push('Captured: '+(d.timestamp||'unknown'));
-    lines.push('Transfer: '+(d.transfer||'pending'));
-    if(d.source)lines.push('Source: '+d.source);
-    if(d.engine_id)lines.push('TTS engine: '+d.engine_id);
-    if(d.stage_ms){
-      lines.push('HA generation: '+d.stage_ms.ha_generation+' ms');
-      lines.push('Binary fetch: '+d.stage_ms.binary_download+' ms');
-      lines.push('WAV processing: '+d.stage_ms.total_bridge+' ms');
-    }
-    if(d.first_audio_queued_ms!==undefined)
-      lines.push('First audio queued: '+d.first_audio_queued_ms+' ms');
-    if(d.prepare_ms!==undefined)lines.push('TTS prepare: '+d.prepare_ms+' ms');
-    if(d.chunk_transfer_ms!==undefined)lines.push('WAV chunks: '+d.chunk_transfer_ms+' ms');
-    if(d.total_wav_ms!==undefined)lines.push('Total WAV: '+d.total_wav_ms+' ms');
-    if(d.error)lines.push('Error: '+d.error);
-  }
-  if(watch){
-    lines.push('Watch playback at '+watch.timestamp+':');
-    lines.push('Empty events: '+watch.empty+'; empty ms: '+watch.empty_ms);
-    lines.push('Partial writes: '+watch.partial+'; zero writes: '+watch.zero);
-    lines.push('Peak ADPCM ring: '+watch.peak+' B');
-  }
-  return '<div style="white-space:pre-wrap;word-break:break-word;font-size:13px">'+
-    lines.join('\n').replace(/&/g,'&amp;').replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;').replace(/"/g,'&quot;')+'</div>';
-}
 var favoriteConfigRows=[];
 var CATALOG_CACHE_KEY='HA_CONTROLS_CACHE_V1';
 var CATALOG_FETCH_AT_KEY='HA_CONTROLS_FETCHED_AT_V2';
@@ -230,35 +193,47 @@ function configureWithDevices(rows){
       String(a.name||'').localeCompare(String(b.name||''));
   }).slice(0,48);
   var items=[
-    {type:'heading',defaultValue:'Watch device visibility'},
-    {type:'text',defaultValue:'Favorite pins a device to Favorites. Hide on watch removes it from Favorites, Rooms, and Scenes & Scripts while keeping its setting saved. Home Assistant and voice control are unaffected.'},
-    {type:'toggle',messageKey:'REFRESH_DEVICES',label:'Refresh devices and rooms on next visit',
-      defaultValue:false}
+    {type:'heading',defaultValue:'Watch devices'},
+    {type:'text',defaultValue:'Favorite adds to Favorites; Hide removes an item from all watch lists. Hidden favorites stay saved.'},
+    {type:'toggle',messageKey:'REFRESH_DEVICES',label:'Refresh devices and rooms',
+      defaultValue:false},
+    {type:'text',defaultValue:
+      '<style>'+
+      '.component-checkbox>.label{font-weight:600;padding-bottom:4px;}'+
+      '.component-checkbox .checkbox-group{display:flex;gap:4px;padding-bottom:2px;}'+
+      '.component-checkbox .checkbox-group label{flex:1;min-width:0;gap:5px;padding:7px 2px;}'+
+      '.component-checkbox .checkbox-group .label{font-size:0.9em;white-space:nowrap;}'+
+      '.component-checkbox .checkbox-group i{width:23px;height:23px;flex-shrink:0;}'+
+      '</style>'}
   ];
   var previousRoom='';
   favoriteConfigRows.forEach(function(r,i){
-    if(r.room!==previousRoom){
-      previousRoom=r.room;
-      items.push({type:'heading',defaultValue:String(r.room||'Unassigned').slice(0,36)});
+    var room=String(r.room||'Unassigned');
+    if(room!==previousRoom){
+      previousRoom=room;
+      items.push({type:'heading',defaultValue:room.slice(0,36)});
     }
-    items.push({type:'toggle',messageKey:'FAV_'+i,
-      label:'Favorite: '+String(r.name||r.id).slice(0,55),
-      defaultValue:favorites.indexOf(r.id)>=0});
-    items.push({type:'toggle',messageKey:'HIDE_'+i,
-      label:'Hide on watch: '+String(r.name||r.id).slice(0,51),
-      defaultValue:hidden.indexOf(r.id)>=0});
-  });
-  if(!favoriteConfigRows.length)
-    items.push({type:'text',defaultValue:'No cached devices yet. Configure Bridge, open Devices by Room, then reopen Settings.'});
-  cfg.splice(1,0,{type:'section',items:items});
-  cfg.forEach(function(section){
-    if(!section.items)return;
-    section.items.forEach(function(item){
-      if(item.id==='pcm_debug_display')item.defaultValue=diagnosticsText();
+    // Native Clay checkbox group: a single device row with two independent
+    // options. The DEV_i[2] app-message keys are reserved in package.json;
+    // values are intercepted on webviewclosed and never sent to the watch.
+    items.push({
+      type:'checkboxgroup',
+      messageKey:'DEV_'+i,
+      label:escapeSettingsText(String(r.name||r.id).slice(0,65)),
+      defaultValue:[favorites.indexOf(r.id)>=0,hidden.indexOf(r.id)>=0],
+      options:['Favorite','Hide']
     });
   });
+  if(!favoriteConfigRows.length)
+    items.push({type:'text',defaultValue:'No cached devices yet. Open Devices by Room on the watch, then reopen Settings.'});
+  // Display and Bridge first, then the grouped per-device controls.
+  cfg.splice(cfg.length-1,0,{type:'section',items:items});
   clay=new Clay(cfg,null,{autoHandleEvents:false});
   Pebble.openURL(clay.generateUrl());
+}
+function escapeSettingsText(value){
+  return value.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 Pebble.addEventListener('showConfiguration',function(){
   // Opening settings must not require a network call, especially on Android.
@@ -299,21 +274,20 @@ Pebble.addEventListener('webviewclosed',function(e){
   if(favoriteConfigRows.length){
     var chosen=favoriteIds(),hidden=hiddenIds(),visibilityChanged=false;
     favoriteConfigRows.forEach(function(r,i){
-      var favoriteValue=field('FAV_'+i),hiddenValue=field('HIDE_'+i);
-      if(favoriteValue!==undefined){
-        var oldFavorite=chosen.indexOf(r.id)>=0;
-        var newFavorite=valueBoolean(favoriteValue,false);
-        if(newFavorite!==oldFavorite)visibilityChanged=true;
-        chosen=chosen.filter(function(id){return id!==r.id;});
-        if(newFavorite)chosen.push(r.id);
-      }
-      if(hiddenValue!==undefined){
-        var oldHidden=hidden.indexOf(r.id)>=0;
-        var newHidden=valueBoolean(hiddenValue,false);
-        if(newHidden!==oldHidden)visibilityChanged=true;
-        hidden=hidden.filter(function(id){return id!==r.id;});
-        if(newHidden)hidden.push(r.id);
-      }
+      var selections=field('DEV_'+i);
+      // Raw Clay checkboxgroup responses use {value:[true,false]}.
+      // Also tolerate 1/0 values, and leave existing preferences unchanged
+      // when a field is absent (e.g., a cancelled or partial config page).
+      if(!Array.isArray(selections)||selections.length<2)return;
+      var oldFavorite=chosen.indexOf(r.id)>=0;
+      var oldHidden=hidden.indexOf(r.id)>=0;
+      var newFavorite=valueBoolean(selections[0],false);
+      var newHidden=valueBoolean(selections[1],false);
+      if(newFavorite!==oldFavorite||newHidden!==oldHidden)visibilityChanged=true;
+      chosen=chosen.filter(function(id){return id!==r.id;});
+      hidden=hidden.filter(function(id){return id!==r.id;});
+      if(newFavorite)chosen.push(r.id);
+      if(newHidden)hidden.push(r.id);
     });
     localStorage.setItem('HA_FAVORITES_V1',JSON.stringify(chosen));
     localStorage.setItem('HA_HIDDEN_V1',JSON.stringify(hidden));
