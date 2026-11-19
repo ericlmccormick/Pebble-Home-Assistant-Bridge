@@ -369,6 +369,14 @@ static void list_unload(Window *w){
 }
 // The phone supplies sorted rooms. Construct visual sections over cached
 // rows; opening or scrolling them never causes another Bluetooth message.
+static void list_push(void){
+  if(s_list)return;
+  s_list=window_create();
+  window_set_window_handlers(s_list,(WindowHandlers){
+    .load=list_load,.unload=list_unload
+  });
+  window_stack_push(s_list,true);
+}
 static void rooms_rebuild(void){
   s_room_count=0;
   if(s_mode!=0)return;
