@@ -27,7 +27,9 @@
       "CTRL_KIND",
       "CTRL_FAV",
       "LARGE_TEXT",
-      "THEME_DARK"
+      "THEME_DARK",
+      "CTRL_REV",
+      "CTRL_TOTAL"
     ],
     "projectType": "native",
     "resources": {
@@ -108,6 +110,6 @@
       }
     ]
   },
-  "version": "1.4.1",
-  "description": "Home Assistant Control Center with accessible typography and audited day/night text and icon contrast"
+  "version": "1.5.0",
+  "description": "Home Assistant Control Center with cached room/favorite lists, per-device hide settings, run actions and refined text spacing"
 }
