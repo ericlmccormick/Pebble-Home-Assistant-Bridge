@@ -145,6 +145,20 @@ function configureWithDevices(rows){
   Pebble.openURL(clay.generateUrl());
 }
 Pebble.addEventListener('showConfiguration',function(){
+  // A hung Bridge action must never block the app's configuration page.
+  // Show last-known devices, or at least basic settings, after 2.5 seconds.
+  var opened=false;
+  var fallback=[];
+  try {
+    fallback=JSON.parse(localStorage.getItem('HA_CONTROLS_CACHE_V1')||'[]');
+    if(!Array.isArray(fallback))fallback=[];
+  }catch(e){fallback=[];}
+  function openOnce(rows){
+    if(opened)return;
+    opened=true;
+    configureWithDevices(rows);
+  }
+  setTimeout(function(){openOnce(fallback);},2500);
   pluginAction('list_controls',{}).then(function(result){
     var rows=pluginJson(result);
     if(!Array.isArray(rows))throw Error('No devices');
@@ -152,10 +166,11 @@ Pebble.addEventListener('showConfiguration',function(){
       var room=String(a.room||'').localeCompare(String(b.room||''));
       return room||String(a.name||'').localeCompare(String(b.name||''));
     });
-    configureWithDevices(rows);
+    localStorage.setItem('HA_CONTROLS_CACHE_V1',JSON.stringify(rows));
+    openOnce(rows);
   }).catch(function(err){
     console.log('Favorites discovery: '+String(err&&err.message||err));
-    configureWithDevices([]);
+    openOnce(fallback);
   });
 });
 function sendWatchSettings(preview){
@@ -291,6 +306,7 @@ function controlLoad(mode){
   pluginAction('list_controls',{}).then(function(result){
     var rows=pluginJson(result);
     if(!Array.isArray(rows))throw Error('Bridge returned no controllable entities');
+    localStorage.setItem('HA_CONTROLS_CACHE_V1',JSON.stringify(rows));
     controlRows=visibleControls(rows,mode);
     var i=0;
     function sendNext(){
