@@ -6,15 +6,19 @@
 // Control Center is a separate window stack from the established voice/audio UI.
 // Keep watch memory bounded and never expose high-risk device domains.
 #define CONTROL_MAX 48
-#define NAME_LEN 48
-#define ROOM_LEN 32
+// 72 bytes per row, 48 rows = 3456 bytes. Three rows (216 bytes)
+// per persist key stay below Pebble's 256-byte value limit and 4KB total.
+#define NAME_LEN 36
+#define ROOM_LEN 22
+#define STATE_LEN 12
+#define CACHE_ROWS_PER_KEY 3
 #define CACHE_COUNT_KEY 3800
 #define CACHE_REV_KEY 3801
 #define CACHE_STAMP_KEY 3802
 #define CACHE_FIRST_ROW_KEY 3900
 #define CACHE_REFRESH_SECONDS 3600
 typedef struct {
-  char id[64], name[NAME_LEN], state[28], room[ROOM_LEN];
+  char name[NAME_LEN], room[ROOM_LEN], state[STATE_LEN];
   uint8_t kind;
   bool favorite;
 } ControlRow;
@@ -31,7 +35,7 @@ static TextLayer *s_hint=NULL;
 static char s_hint_text[64]="Select: toggle or run";
 static int32_t s_catalog_revision=0;
 static time_t s_last_sync_at=0;
-static bool s_catalog_loaded=false,s_sync_pending=false;
+static bool s_catalog_loaded=false,s_sync_pending=false,s_catalog_dirty=false;
 
 static bool s_large_text=false;
 static bool s_night_theme=false;
@@ -225,29 +229,45 @@ static void catalog_restore(void){
   s_catalog_loaded=true;
   int count=persist_exists(CACHE_COUNT_KEY)?persist_read_int(CACHE_COUNT_KEY):0;
   if(count<0||count>CONTROL_MAX)return;
+  for(int start=0;start<count;start+=CACHE_ROWS_PER_KEY){
+    int n=(count-start)>CACHE_ROWS_PER_KEY?CACHE_ROWS_PER_KEY:(count-start);
+    int size=n*(int)sizeof(ControlRow);
+    if(size>PERSIST_DATA_MAX_LENGTH||
+       persist_get_size(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY)!=size||
+       persist_read_data(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY,&s_rows[start],size)!=size){
+      s_count=0;s_catalog_revision=0;return;
+    }
+  }
   for(int i=0;i<count;i++){
-    if(persist_get_size(CACHE_FIRST_ROW_KEY+i)!=(int)sizeof(ControlRow)){
-      s_count=0;s_catalog_revision=0;return;
-    }
-    if(persist_read_data(CACHE_FIRST_ROW_KEY+i,&s_rows[i],sizeof(ControlRow))!=(int)sizeof(ControlRow)){
-      s_count=0;s_catalog_revision=0;return;
-    }
-    s_rows[i].id[sizeof(s_rows[i].id)-1]=0;
-    s_rows[i].name[sizeof(s_rows[i].name)-1]=0;
-    s_rows[i].room[sizeof(s_rows[i].room)-1]=0;
-    s_rows[i].state[sizeof(s_rows[i].state)-1]=0;
+    s_rows[i].name[NAME_LEN-1]=0;
+    s_rows[i].room[ROOM_LEN-1]=0;
+    s_rows[i].state[STATE_LEN-1]=0;
   }
   s_count=count;
   s_catalog_revision=persist_exists(CACHE_REV_KEY)?persist_read_int(CACHE_REV_KEY):0;
   s_last_sync_at=persist_exists(CACHE_STAMP_KEY)?(time_t)persist_read_int(CACHE_STAMP_KEY):0;
 }
-static void catalog_store(void){
-  // Storage writes only after a successful catalog synchronization.
-  for(int i=0;i<s_count;i++)
-    persist_write_data(CACHE_FIRST_ROW_KEY+i,&s_rows[i],sizeof(ControlRow));
+static bool catalog_store(void){
+  // Persist metadata only after a successfully completed catalog transfer.
+  // We intentionally don't rewrite all 16 blocks during unchanged hourly checks.
+  for(int start=0;start<s_count;start+=CACHE_ROWS_PER_KEY){
+    int n=(s_count-start)>CACHE_ROWS_PER_KEY?CACHE_ROWS_PER_KEY:(s_count-start);
+    int size=n*(int)sizeof(ControlRow);
+    if(size>PERSIST_DATA_MAX_LENGTH||
+       persist_write_data(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY,
+         &s_rows[start],size)!=size)return false;
+  }
   persist_write_int(CACHE_COUNT_KEY,s_count);
   persist_write_int(CACHE_REV_KEY,s_catalog_revision);
   persist_write_int(CACHE_STAMP_KEY,(int)s_last_sync_at);
+  return true;
+}
+static void catalog_store_status(int index){
+  int start=index-(index%CACHE_ROWS_PER_KEY);
+  int n=(s_count-start)>CACHE_ROWS_PER_KEY?CACHE_ROWS_PER_KEY:(s_count-start);
+  if(n<=0)return;
+  persist_write_data(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY,
+    &s_rows[start],n*sizeof(ControlRow));
 }
 static void visible_rebuild(void){
   s_visible_count=0;
@@ -484,20 +504,19 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     Tuple *i=dict_find(iter,MESSAGE_KEY_CTRL_INDEX);
     Tuple *n=dict_find(iter,MESSAGE_KEY_CTRL_NAME);
     Tuple *st=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
-    Tuple *id=dict_find(iter,MESSAGE_KEY_CTRL_ID);
     Tuple *room=dict_find(iter,MESSAGE_KEY_CTRL_ROOM);
     Tuple *kind=dict_find(iter,MESSAGE_KEY_CTRL_KIND);
     Tuple *fav=dict_find(iter,MESSAGE_KEY_CTRL_FAV);
-    if(!i||!n||!st||!id)return;
+    if(!i||!n||!st)return;
     int index=i->value->int32;
     if(index<0||index>=CONTROL_MAX)return;
     snprintf(s_rows[index].name,sizeof(s_rows[index].name),"%s",n->value->cstring);
     snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
-    snprintf(s_rows[index].id,sizeof(s_rows[index].id),"%s",id->value->cstring);
     snprintf(s_rows[index].room,sizeof(s_rows[index].room),"%s",room?room->value->cstring:"Unassigned");
     s_rows[index].kind=kind?(uint8_t)kind->value->int32:0;
     s_rows[index].favorite=fav?fav->value->int32!=0:false;
     if(index>=s_count)s_count=index+1;
+    s_catalog_dirty=true;
     return;
   }
   if(strcmp(command,"CTRL_STATE")==0){
@@ -508,7 +527,7 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     if(index<0||index>=s_count)return;
     if(strcmp(s_rows[index].state,st->value->cstring)!=0){
       snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
-      persist_write_data(CACHE_FIRST_ROW_KEY+index,&s_rows[index],sizeof(ControlRow));
+      catalog_store_status(index);
       if(s_menu)menu_layer_reload_data(s_menu);
     }
     return;
@@ -522,7 +541,16 @@ void controls_receive(DictionaryIterator *iter,const char *command){
       s_count=n;
       s_catalog_revision=rev->value->int32;
       s_last_sync_at=time(NULL);
-      catalog_store();
+      if(s_catalog_dirty){
+        if(!catalog_store()){
+          s_catalog_revision=0;
+          persist_write_int(CACHE_REV_KEY,0);
+        }
+      }else{
+        persist_write_int(CACHE_REV_KEY,s_catalog_revision);
+        persist_write_int(CACHE_STAMP_KEY,(int)s_last_sync_at);
+      }
+      s_catalog_dirty=false;
     }
     s_loading=false;s_sync_pending=false;
     if(s_mode==0)rooms_rebuild();
