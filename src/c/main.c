@@ -6,6 +6,7 @@
 #include "ha_audio.h"
 void controls_open(void);
 void controls_home_open(void);
+void controls_apply_settings(bool large,bool dark);
 void controls_receive(DictionaryIterator *iter,const char *command);
 static void open_devices(ClickRecognizerRef recognizer, void *context) { controls_open(); }
 // The plugin API does not expose a raw, continuous microphone stream.
@@ -56,6 +57,8 @@ static AppTimer *s_pinwheel_timer = NULL;
 static int s_pinwheel_angle = 0;                
 static DictationSession *s_dictation_session;
 static bool s_auto_send = true;
+static bool s_large_text = false;
+static bool s_theme_dark = false;
 static int s_haptic_level = 2; // 0 off, 1 low, 2 medium, 3 high
 static TextLayer *s_thinking_transcript_layer;
 static char s_thinking_transcript[256];   
@@ -410,6 +413,24 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   }
     else if (strcmp(command_tuple->value->cstring, "SETTINGS") == 0) {
       Tuple *font_tuple = dict_find(iterator, MESSAGE_KEY_FONT_SIZE);
+      Tuple *large_tuple = dict_find(iterator, MESSAGE_KEY_LARGE_TEXT);
+      Tuple *theme_tuple = dict_find(iterator, MESSAGE_KEY_THEME_DARK);
+      if(large_tuple)s_large_text=large_tuple->value->int32!=0;
+      if(theme_tuple)s_theme_dark=theme_tuple->value->int32!=0;
+      controls_apply_settings(s_large_text,s_theme_dark);
+      if(s_main_window)window_set_background_color(s_main_window,s_theme_dark?GColorBlack:GColorWhite);
+      if(s_text_layer){
+        text_layer_set_background_color(s_text_layer,s_theme_dark?GColorBlack:GColorWhite);
+        text_layer_set_text_color(s_text_layer,s_theme_dark?GColorWhite:GColorBlack);
+      }
+      if(s_prompt_layer){
+        text_layer_set_text_color(s_prompt_layer,s_theme_dark?GColorWhite:GColorBlack);
+        text_layer_set_background_color(s_prompt_layer,s_theme_dark?GColorBlack:GColorWhite);
+      }
+      if(s_title_layer){
+        text_layer_set_text_color(s_title_layer,s_theme_dark?GColorWhite:GColorBlack);
+        text_layer_set_background_color(s_title_layer,s_theme_dark?GColorBlack:GColorWhite);
+      }
       Tuple *auto_tuple = dict_find(iterator, MESSAGE_KEY_AUTO_SEND);
       Tuple *haptic_tuple = dict_find(iterator, MESSAGE_KEY_HAPTIC_LEVEL);
       if (auto_tuple) s_auto_send = auto_tuple->value->int32 != 0;
@@ -422,10 +443,15 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         dictation_session_enable_confirmation(s_dictation_session, !s_auto_send);
       if (font_tuple) {
         int new_size = font_tuple->value->int32;
+        if(large_tuple)new_size=s_large_text?28:24;
         if (new_size <= 14) text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
         else if (new_size <= 18) text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
         else if (new_size <= 24) text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
         else text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_28));
+        update_text_layout();
+      }
+      if(!font_tuple && large_tuple && s_text_layer){
+        text_layer_set_font(s_text_layer,fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_28:FONT_KEY_GOTHIC_24));
         update_text_layout();
       }
     }
