@@ -28,39 +28,95 @@ static void send_command(const char *command,int index){
   dict_write_end(out);
   app_message_outbox_send();
 }
-static const char *kind_glyph(uint8_t kind){
-  switch(kind){
-    case 1:return "L"; // light
-    case 2:return "S"; // switch
-    case 3:return "F"; // fan
-    case 4:return "B"; // blind/cover
-    case 5:return ">"; // scene
-    case 6:return "R"; // script
-    case 7:return "A"; // automation
-    default:return "*";
-  }
-}
 static GColor kind_color(uint8_t kind){
 #ifdef PBL_COLOR
   switch(kind){
-    case 1:return GColorChromeYellow;
-    case 3:return GColorVividCerulean;
-    case 4:return GColorOrange;
-    case 5:return GColorJaegerGreen;
+    case 1:return GColorChromeYellow; // lights
+    case 3:return GColorVividCerulean; // fans
+    case 4:return GColorOrange; // covers
+    case 5:case 11:return GColorJaegerGreen; // scenes and home scripts
     case 6:return GColorBlueMoon;
     case 7:return GColorPurple;
+    case 8:return GColorVividCerulean; // microphone
+    case 9:return GColorChromeYellow; // favorites
+    case 10:return GColorCyan;
     default:return GColorLightGray;
   }
 #else
-  return GColorBlack;
+  return GColorWhite;
 #endif
 }
-static void paint_badge(GContext *ctx,GPoint center,uint8_t kind,bool highlighted){
-  graphics_context_set_fill_color(ctx, highlighted?GColorWhite:kind_color(kind));
-  graphics_fill_circle(ctx,center,13);
-  graphics_context_set_text_color(ctx,GColorBlack);
-  graphics_draw_text(ctx,kind_glyph(kind),fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-    GRect(center.x-10,center.y-12,20,23),GTextOverflowModeFill,GTextAlignmentCenter,NULL);
+static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted){
+  graphics_context_set_fill_color(ctx,highlighted?GColorWhite:kind_color(kind));
+  graphics_fill_circle(ctx,c,14);
+  graphics_context_set_stroke_color(ctx,GColorBlack);
+  graphics_context_set_fill_color(ctx,GColorBlack);
+  graphics_context_set_stroke_width(ctx,2);
+  switch(kind){
+    case 1: // lightbulb: globe, stem, screw base
+      graphics_draw_circle(ctx,GPoint(c.x,c.y-4),6);
+      graphics_draw_line(ctx,GPoint(c.x-3,c.y+1),GPoint(c.x-3,c.y+6));
+      graphics_draw_line(ctx,GPoint(c.x+3,c.y+1),GPoint(c.x+3,c.y+6));
+      graphics_draw_line(ctx,GPoint(c.x-4,c.y+7),GPoint(c.x+4,c.y+7));
+      graphics_draw_line(ctx,GPoint(c.x-3,c.y+10),GPoint(c.x+3,c.y+10));
+      break;
+    case 2: // switch
+      graphics_draw_round_rect(ctx,GRect(c.x-10,c.y-5,20,10),5);
+      graphics_fill_circle(ctx,GPoint(c.x+4,c.y),4);
+      break;
+    case 3: // 3-blade fan
+      graphics_fill_circle(ctx,c,3);
+      graphics_fill_circle(ctx,GPoint(c.x,c.y-7),4);
+      graphics_fill_circle(ctx,GPoint(c.x-7,c.y+5),4);
+      graphics_fill_circle(ctx,GPoint(c.x+7,c.y+5),4);
+      break;
+    case 4: // shades
+      graphics_draw_line(ctx,GPoint(c.x-9,c.y-8),GPoint(c.x+9,c.y-8));
+      graphics_draw_line(ctx,GPoint(c.x-8,c.y-4),GPoint(c.x+8,c.y-4));
+      graphics_draw_line(ctx,GPoint(c.x-8,c.y+1),GPoint(c.x+8,c.y+1));
+      graphics_draw_line(ctx,GPoint(c.x-8,c.y+6),GPoint(c.x+8,c.y+6));
+      break;
+    case 5:case 11: // scene: play triangle
+      graphics_draw_line(ctx,GPoint(c.x-5,c.y-8),GPoint(c.x+7,c.y));
+      graphics_draw_line(ctx,GPoint(c.x+7,c.y),GPoint(c.x-5,c.y+8));
+      graphics_draw_line(ctx,GPoint(c.x-5,c.y+8),GPoint(c.x-5,c.y-8));
+      break;
+    case 6: // script / workflow
+      graphics_draw_line(ctx,GPoint(c.x-7,c.y-9),GPoint(c.x,c.y-2));
+      graphics_draw_line(ctx,GPoint(c.x,c.y-2),GPoint(c.x-7,c.y+7));
+      graphics_draw_line(ctx,GPoint(c.x+1,c.y+8),GPoint(c.x+9,c.y+8));
+      break;
+    case 7: // automation
+      graphics_draw_circle(ctx,c,7);
+      graphics_fill_circle(ctx,c,3);
+      graphics_draw_line(ctx,GPoint(c.x,c.y-11),GPoint(c.x,c.y-7));
+      graphics_draw_line(ctx,GPoint(c.x,c.y+7),GPoint(c.x,c.y+11));
+      graphics_draw_line(ctx,GPoint(c.x-11,c.y),GPoint(c.x-7,c.y));
+      graphics_draw_line(ctx,GPoint(c.x+7,c.y),GPoint(c.x+11,c.y));
+      break;
+    case 8: // microphone
+      graphics_draw_round_rect(ctx,GRect(c.x-4,c.y-9,8,13),4);
+      graphics_draw_line(ctx,GPoint(c.x-7,c.y),GPoint(c.x-7,c.y+5));
+      graphics_draw_line(ctx,GPoint(c.x+7,c.y),GPoint(c.x+7,c.y+5));
+      graphics_draw_line(ctx,GPoint(c.x-7,c.y+5),GPoint(c.x+7,c.y+5));
+      graphics_draw_line(ctx,GPoint(c.x,c.y+5),GPoint(c.x,c.y+10));
+      break;
+    case 9: // star marker: simple sparkle
+      graphics_draw_line(ctx,GPoint(c.x,c.y-10),GPoint(c.x,c.y+10));
+      graphics_draw_line(ctx,GPoint(c.x-10,c.y),GPoint(c.x+10,c.y));
+      graphics_draw_line(ctx,GPoint(c.x-6,c.y-6),GPoint(c.x+6,c.y+6));
+      graphics_draw_line(ctx,GPoint(c.x+6,c.y-6),GPoint(c.x-6,c.y+6));
+      break;
+    case 10: // house outline
+      graphics_draw_line(ctx,GPoint(c.x-10,c.y-1),GPoint(c.x,c.y-10));
+      graphics_draw_line(ctx,GPoint(c.x,c.y-10),GPoint(c.x+10,c.y-1));
+      graphics_draw_line(ctx,GPoint(c.x-7,c.y-2),GPoint(c.x-7,c.y+9));
+      graphics_draw_line(ctx,GPoint(c.x+7,c.y-2),GPoint(c.x+7,c.y+9));
+      graphics_draw_line(ctx,GPoint(c.x-7,c.y+9),GPoint(c.x+7,c.y+9));
+      break;
+    default: // generic device
+      graphics_draw_circle(ctx,c,7);
+  }
 }
 static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
@@ -144,7 +200,7 @@ static const char *home_subs[]={"Dictation and conversation","Your pinned contro
 static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
   bool active=menu_cell_layer_is_highlighted(cell);
-  paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,20),b.size.h/2),(uint8_t)(idx->row+1),active);
+  paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,20),b.size.h/2),(uint8_t)(idx->row+8),active);
   int x=PBL_IF_ROUND_ELSE(60,39);
   graphics_context_set_text_color(ctx,active?GColorBlack:GColorWhite);
   graphics_draw_text(ctx,home_names[idx->row],fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
