@@ -37,5 +37,11 @@ jobs:
           assert 'mic_stream_to_phone' not in c
           assert 'new WebSocket' not in phone and '/api/conversation/process' not in phone
           assert 'USE_BUILTIN_CONNECTION' not in phone
-          print('Bridge-only native audio and message contract passed')
+          controls=Path('src/c/ha_controls.c').read_text()
+          start=controls.index('static void home_load(')
+          end=controls.index('static void home_unload(',start)
+          assert 'window_single_click_subscribe(' not in controls[start:end], 'Home load must not register clicks outside a ClickConfigProvider'
+          assert 'window_set_click_config_provider(w,home_click_config)' in controls[start:end]
+          assert 'static void home_click_config(void *context)' in controls
+          print('Bridge-only native audio and startup click-config contract passed')
           PY
