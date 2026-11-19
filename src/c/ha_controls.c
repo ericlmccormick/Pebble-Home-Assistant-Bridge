@@ -29,8 +29,10 @@ static bool s_night_theme=false;
 static GColor ui_bg(void){return s_night_theme?GColorBlack:GColorWhite;}
 static GColor ui_fg(void){return s_night_theme?GColorWhite:GColorBlack;}
 static GColor ui_muted(void){return s_night_theme?PBL_IF_COLOR_ELSE(GColorLightGray,GColorWhite):PBL_IF_COLOR_ELSE(GColorDarkGray,GColorBlack);}
-static GColor ui_selected_bg(void){return PBL_IF_COLOR_ELSE(GColorVividCerulean,GColorBlack);}
-static GColor ui_selected_fg(void){return GColorWhite;}
+// Pure blue is intentionally darker than the old light cyan: white text
+// remains readable over selected rows on 64-color Pebble displays.
+static GColor ui_selected_bg(void){return PBL_IF_COLOR_ELSE(GColorBlue,s_night_theme?GColorWhite:GColorBlack);}
+static GColor ui_selected_fg(void){return PBL_IF_COLOR_ELSE(GColorWhite,s_night_theme?GColorBlack:GColorWhite);}
 static GFont title_font(void){return fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_24_BOLD:FONT_KEY_GOTHIC_18_BOLD);}
 static GFont sub_font(void){return fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_18:FONT_KEY_GOTHIC_14);}
 static GColor cell_fg(bool active){return active?ui_selected_fg():ui_fg();}
@@ -70,23 +72,41 @@ static GColor kind_color(uint8_t kind){
     case 1:return GColorChromeYellow; // lights
     case 3:return GColorVividCerulean; // fans
     case 4:return GColorOrange; // covers
-    case 5:case 11:return GColorJaegerGreen; // scenes and home scripts
-    case 6:return GColorBlueMoon;
-    case 7:return GColorPurple;
+    case 5:case 11:return GColorChromeYellow; // bright for dark ink
+    case 6:return GColorCyan; // bright for dark ink
+    case 7:return GColorOrange; // bright for dark ink
     case 8:return GColorVividCerulean; // microphone
     case 9:return GColorChromeYellow; // favorites
     case 10:return GColorCyan;
     default:return GColorLightGray;
   }
 #else
-  return GColorWhite;
+  return s_night_theme?GColorWhite:GColorBlack;
+#endif
+}
+static GColor badge_fill(uint8_t kind,bool selected){
+#ifdef PBL_COLOR
+  return selected?GColorWhite:kind_color(kind);
+#else
+  return selected?ui_selected_fg():kind_color(kind);
+#endif
+}
+static GColor badge_ink(bool selected){
+#ifdef PBL_COLOR
+  return GColorBlack; // all color badge fills are deliberately light
+#else
+  return selected?ui_selected_bg():ui_bg();
 #endif
 }
 static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted){
-  graphics_context_set_fill_color(ctx,highlighted?ui_bg():kind_color(kind));
+  graphics_context_set_fill_color(ctx,badge_fill(kind,highlighted));
   graphics_fill_circle(ctx,c,14);
-  graphics_context_set_stroke_color(ctx,GColorBlack);
-  graphics_context_set_fill_color(ctx,GColorBlack);
+  // Outer ring contrasts against the row; pictogram contrasts against badge.
+  graphics_context_set_stroke_color(ctx,highlighted?ui_selected_fg():ui_fg());
+  graphics_context_set_stroke_width(ctx,1);
+  graphics_draw_circle(ctx,c,14);
+  graphics_context_set_stroke_color(ctx,badge_ink(highlighted));
+  graphics_context_set_fill_color(ctx,badge_ink(highlighted));
   graphics_context_set_stroke_width(ctx,2);
   switch(kind){
     case 1: // lightbulb: globe, stem, screw base
@@ -169,7 +189,7 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int x=PBL_IF_ROUND_ELSE(35,8);
   paint_badge(ctx,GPoint(x+13,b.size.h/2),r->kind,active);
   int left=x+33,wide=b.size.w-left-PBL_IF_ROUND_ELSE(34,8);
-  graphics_context_set_text_color(ctx,active?GColorBlack:GColorWhite);
+  graphics_context_set_text_color(ctx,cell_fg(active));
   graphics_draw_text(ctx,r->name,title_font(),
     GRect(left,3,wide-9,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char subtitle[70];
@@ -249,12 +269,13 @@ static void room_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   bool active=menu_cell_layer_is_highlighted(cell);
   paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,22),b.size.h/2),10,active);
   int x=PBL_IF_ROUND_ELSE(61,45);
-  graphics_context_set_text_color(ctx,active?GColorBlack:GColorWhite);
+  graphics_context_set_text_color(ctx,cell_fg(active));
   graphics_draw_text(ctx,s_rooms[idx->row],title_font(),
     GRect(x,5,b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char summary[32];
   snprintf(summary,sizeof(summary),"%d device%s",s_room_sizes[idx->row],
     s_room_sizes[idx->row]==1?"":"s");
+  graphics_context_set_text_color(ctx,cell_sub(active));
   graphics_draw_text(ctx,summary,sub_font(),
     GRect(x,sub_top(),b.size.w-x-7,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
 }
@@ -320,10 +341,10 @@ static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   bool active=menu_cell_layer_is_highlighted(cell);
   paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,20),b.size.h/2),(uint8_t)(idx->row+8),active);
   int x=PBL_IF_ROUND_ELSE(60,39);
-  graphics_context_set_text_color(ctx,active?GColorBlack:GColorWhite);
+  graphics_context_set_text_color(ctx,cell_fg(active));
   graphics_draw_text(ctx,home_names[idx->row],title_font(),
     GRect(x,4,b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
-  graphics_context_set_text_color(ctx,active?GColorBlack:PBL_IF_COLOR_ELSE(GColorLightGray,GColorWhite));
+  graphics_context_set_text_color(ctx,cell_sub(active));
   if(!s_large_text)graphics_draw_text(ctx,home_subs[idx->row],sub_font(),
     GRect(x,sub_top(),b.size.w-x-7,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
 }
