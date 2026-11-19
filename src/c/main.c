@@ -101,7 +101,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
   GPoint center = grect_center_point(&bounds);  
   int radius = 9;                               
-  graphics_context_set_stroke_color(ctx, GColorBlack); 
+  graphics_context_set_stroke_color(ctx, s_theme_dark ? GColorWhite : GColorBlack); 
   graphics_context_set_stroke_width(ctx, 3);    
   for(int i = 0; i < 4; i++) {                  
      int32_t angle = TRIG_MAX_ANGLE * (s_pinwheel_angle + i * 90) / 360; 
@@ -113,7 +113,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
 
 static void arrow_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
-  graphics_context_set_stroke_color(ctx, GColorBlack); 
+  graphics_context_set_stroke_color(ctx, s_theme_dark ? GColorWhite : GColorBlack); 
   graphics_context_set_stroke_width(ctx, 3);    
   int y = bounds.size.h / 2;                    
   int x_start = 0;                              
@@ -431,6 +431,14 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         text_layer_set_text_color(s_title_layer,s_theme_dark?GColorWhite:GColorBlack);
         text_layer_set_background_color(s_title_layer,s_theme_dark?GColorBlack:GColorWhite);
       }
+      if(s_thinking_transcript_layer){
+        text_layer_set_text_color(s_thinking_transcript_layer,s_theme_dark?GColorWhite:GColorBlack);
+      }
+      // The Home Assistant logo artwork is dark. Give it a constant
+      // white backing instead of letting black pixels disappear at night.
+      if(s_logo_layer)bitmap_layer_set_background_color(s_logo_layer,GColorWhite);
+      if(s_pinwheel_layer)layer_mark_dirty(s_pinwheel_layer);
+      if(s_arrow_layer)layer_mark_dirty(s_arrow_layer);
       Tuple *auto_tuple = dict_find(iterator, MESSAGE_KEY_AUTO_SEND);
       Tuple *haptic_tuple = dict_find(iterator, MESSAGE_KEY_HAPTIC_LEVEL);
       if (auto_tuple) s_auto_send = auto_tuple->value->int32 != 0;
@@ -623,6 +631,7 @@ static void main_window_load(Window *window) {
  
 
   // Same idle-screen bitmap layout as Pebble Gemini, now using Home Assistant.
+  bitmap_layer_set_background_color(s_logo_layer,GColorWhite);
   s_logo_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_HOME_ASSISTANT_LOGO);
   if (s_logo_bitmap) {
     bitmap_layer_set_bitmap(s_logo_layer, s_logo_bitmap);
