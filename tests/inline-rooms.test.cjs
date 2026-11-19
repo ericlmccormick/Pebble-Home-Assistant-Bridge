@@ -12,6 +12,9 @@ function between(src,a,b){
 const browse=between(c,'void controls_open_mode(int mode){','// Legacy entry point');
 assert(browse.includes('visible_rebuild();')&&browse.includes('rooms_rebuild();'));
 assert(browse.includes('list_push();'),'Rooms open in the same direct device list');
+assert(c.includes('static void list_push(void){')&&
+       c.includes('.load=list_load,.unload=list_unload'),
+  'Shared device-list window is still constructed after removing room drill-down');
 assert(!browse.includes('s_room_window')&&!browse.includes('room_select'),
   'Rooms must not be selectable drill-down windows');
 const callbacks=between(c,'static void list_load(Window *w){','static void list_unload(Window *w){');
