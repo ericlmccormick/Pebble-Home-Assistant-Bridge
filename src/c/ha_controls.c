@@ -35,8 +35,8 @@ static GFont title_font(void){return fonts_get_system_font(s_large_text?FONT_KEY
 static GFont sub_font(void){return fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_18:FONT_KEY_GOTHIC_14);}
 static GColor cell_fg(bool active){return active?ui_selected_fg():ui_fg();}
 static GColor cell_sub(bool active){return active?ui_selected_fg():ui_muted();}
-static int title_height(void){return s_large_text?33:24;}
-static int sub_top(void){return s_large_text?36:26;}
+static int title_height(void){return s_large_text?56:24;}
+static int sub_top(void){return s_large_text?59:26;}
 static void refresh_menu(MenuLayer *m,Window *w){
   if(w)window_set_background_color(w,ui_bg());
   if(!m)return;
@@ -171,12 +171,12 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int left=x+33,wide=b.size.w-left-PBL_IF_ROUND_ELSE(34,8);
   graphics_context_set_text_color(ctx,active?GColorBlack:GColorWhite);
   graphics_draw_text(ctx,r->name,title_font(),
-    GRect(left,3,wide-9,title_height()),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(left,3,wide-9,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char subtitle[70];
   snprintf(subtitle,sizeof(subtitle),"%s  |  %s",r->room,r->state);
   graphics_context_set_text_color(ctx,cell_sub(active));
   graphics_draw_text(ctx,subtitle,sub_font(),
-    GRect(left,sub_top(),wide,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(left,sub_top(),wide,24),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   if(r->favorite){
     graphics_context_set_text_color(ctx,cell_sub(active));
     graphics_draw_text(ctx,"*",fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
@@ -185,7 +185,7 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   }
 }
 static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){return s_visible_count?s_visible_count:1;}
-static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){return s_large_text?76:52;}
+static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){return s_large_text?86:52;}
 static void select_row(MenuLayer *m,MenuIndex *idx,void *data){
   if(idx->row>=s_visible_count)return;
   send_command("CTRL_ACT",s_visible[idx->row]);
@@ -251,7 +251,7 @@ static void room_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int x=PBL_IF_ROUND_ELSE(61,45);
   graphics_context_set_text_color(ctx,active?GColorBlack:GColorWhite);
   graphics_draw_text(ctx,s_rooms[idx->row],title_font(),
-    GRect(x,5,b.size.w-x-7,title_height()),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(x,5,b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char summary[32];
   snprintf(summary,sizeof(summary),"%d device%s",s_room_sizes[idx->row],
     s_room_sizes[idx->row]==1?"":"s");
@@ -322,9 +322,9 @@ static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int x=PBL_IF_ROUND_ELSE(60,39);
   graphics_context_set_text_color(ctx,active?GColorBlack:GColorWhite);
   graphics_draw_text(ctx,home_names[idx->row],title_font(),
-    GRect(x,4,b.size.w-x-7,title_height()),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(x,4,b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   graphics_context_set_text_color(ctx,active?GColorBlack:PBL_IF_COLOR_ELSE(GColorLightGray,GColorWhite));
-  graphics_draw_text(ctx,home_subs[idx->row],sub_font(),
+  if(!s_large_text)graphics_draw_text(ctx,home_subs[idx->row],sub_font(),
     GRect(x,sub_top(),b.size.w-x-7,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
 }
 static uint16_t home_rows(MenuLayer *m,uint16_t sec,void *ctx){return 4;}
