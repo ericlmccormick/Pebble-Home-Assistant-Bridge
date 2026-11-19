@@ -194,16 +194,29 @@ function configureWithDevices(rows){
   }).slice(0,48);
   var items=[
     {type:'heading',defaultValue:'Watch devices'},
-    {type:'text',defaultValue:'Favorite adds to Favorites; Hide removes an item from all watch lists. Hidden favorites stay saved.'},
+    {type:'text',defaultValue:'Tap the star to favorite or the crossed circle to hide. Hidden favorites remain saved.'},
     {type:'toggle',messageKey:'REFRESH_DEVICES',label:'Refresh devices and rooms',
       defaultValue:false},
+    // Keep the actual Clay checkbox inputs. Only restyle their two visible
+    // controls into the right-aligned icon buttons used by Google Home.
+    // This preserves keyboard/accessibility semantics and the existing
+    // DEV_i[2] saved values (Favorite first, Hide second).
     {type:'text',defaultValue:
       '<style>'+
-      '.component-checkbox>.label{font-weight:600;padding-bottom:4px;}'+
-      '.component-checkbox .checkbox-group{display:flex;gap:4px;padding-bottom:2px;}'+
-      '.component-checkbox .checkbox-group label{display:flex;flex:1;min-width:0;flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:8px;padding:7px 2px;}'+
-      '.component-checkbox .checkbox-group .label{font-size:0.9em;white-space:nowrap;}'+
-      '.component-checkbox .checkbox-group i{width:23px;height:23px;flex-shrink:0;}'+
+      '.component-checkbox{display:flex!important;align-items:center;gap:6px;min-height:46px;padding-top:4px!important;padding-bottom:4px!important;}'+
+      '.component-checkbox>.label{display:block;flex:1 1 auto;min-width:0;font-weight:400!important;font-size:14px!important;line-height:1.25;white-space:normal;overflow-wrap:anywhere;padding:0!important;margin:0!important;max-height:2.6em;overflow:hidden;}'+
+      '.component-checkbox .checkbox-group{display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;gap:0;margin:0!important;padding:0!important;}'+
+      '.component-checkbox .checkbox-group label{display:flex!important;flex:0 0 44px;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;margin:0!important;padding:0!important;position:relative;}'+
+      '.component-checkbox .checkbox-group label .label{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important;}'+
+      '.component-checkbox .checkbox-group i{display:block;position:relative;width:29px!important;height:29px!important;min-width:29px;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;flex-shrink:0;}'+
+      '.component-checkbox .checkbox-group input:checked+i{border:0!important;background:transparent!important;}'+
+      '.component-checkbox .checkbox-group i:after{display:none!important;}'+
+      '.component-checkbox .checkbox-group label:first-child i:before{content:"☆";display:block;position:absolute;inset:0;font-size:29px;line-height:29px;text-align:center;font-family:Arial,sans-serif;color:#ff7a16;}'+
+      '.component-checkbox .checkbox-group label:first-child input:checked+i:before{content:"★";}'+
+      '.component-checkbox .checkbox-group label:nth-child(2) i{color:#929292;}'+
+      '.component-checkbox .checkbox-group label:nth-child(2) input:checked+i{color:#ff7a16;}'+
+      '.component-checkbox .checkbox-group label:nth-child(2) i:before{content:"";display:block;position:absolute;top:4px;left:4px;width:20px;height:20px;box-sizing:border-box;border:2px solid currentColor;border-radius:50%;}'+
+      '.component-checkbox .checkbox-group label:nth-child(2) i:after{content:"";display:block!important;position:absolute;top:14px;left:2px;width:25px;height:2px;box-sizing:border-box;border:0!important;background:currentColor;transform:rotate(-45deg)!important;}'+
       '</style>'}
   ];
   var previousRoom='';
