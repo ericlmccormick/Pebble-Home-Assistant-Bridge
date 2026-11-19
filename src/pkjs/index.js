@@ -50,7 +50,7 @@ function onWeatherEnvelope(data){
   localStorage.setItem('HA_WEATHER_SUN_V1',JSON.stringify({
     sunrise:sunrise,sunset:sunset,savedAt:weatherUpdatedAt}));
   localStorage.setItem('HA_LAST_AUTO_DARK',String(effectiveThemeDark()));
-  if(settingsReady)sendWatchSettings(false);
+  if(settingsReady&&effectiveThemeDark()!==themeDarkSent)sendWatchSettings(false);
 }
 function weatherSubscribe(){
   if(themeMode!=='auto'||typeof Pebble.subscribeToSource!=='function')return;
