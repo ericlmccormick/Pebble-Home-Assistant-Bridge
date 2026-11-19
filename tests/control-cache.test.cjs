@@ -11,7 +11,7 @@ const rows=[
   {id:'script.relax',name:'Relax',room:'Living Room',domain:'script',state:'off'}
 ];
 function harness(storage){
-  let handlers={},outgoing=[],invoked=[],opened=[],sourceTimeout=[];
+  let handlers={},outgoing=[],invoked=[],opened=[],sourceTimeout=[],configs=[];
   const localStorage={
     getItem:key=>Object.prototype.hasOwnProperty.call(storage,key)?storage[key]:null,
     setItem:(key,value)=>{storage[key]=String(value);},
@@ -30,7 +30,7 @@ function harness(storage){
       throw Error('Unexpected plugin action '+action);
     }
   };
-  function Clay(){this.generateUrl=()=> 'pebble://settings';}
+  function Clay(config){configs.push(config);this.generateUrl=()=> 'pebble://settings';}
   const audio={
     diagnostics:()=>null,handleMessage:()=>false,stop:()=>{},
     speak:()=>Promise.resolve()
@@ -42,7 +42,7 @@ function harness(storage){
       (()=>{throw Error('Unexpected require '+name);})()
   };
   vm.runInNewContext(JS,context,{filename:'index.js'});
-  return {handlers,outgoing,invoked,opened,storage,fire:m=>handlers.appmessage({payload:m})};
+  return {handlers,outgoing,invoked,opened,configs,storage,fire:m=>handlers.appmessage({payload:m})};
 }
 async function flush(){for(let i=0;i<9;i++)await new Promise(resolve=>setImmediate(resolve));}
 (async()=>{
@@ -87,6 +87,27 @@ async function flush(){for(let i=0;i<9;i++)await new Promise(resolve=>setImmedia
 
   h.handlers.showConfiguration();
   assert.strictEqual(h.opened.length,1,'Cached settings open without waiting for Bridge');
+  const config=h.configs[h.configs.length-1];
+  const sections=config.filter(x=>x.type==='section');
+  const headings=sections.map(x=>x.items[0].defaultValue);
+  assert.strictEqual(headings.join('|'),'Display|Home Assistant Bridge|Watch devices',
+    'Display and Bridge settings precede the device list');
+  assert(!JSON.stringify(config).includes('Latest Bridge and watch audio diagnostics'),
+    'Diagnostics panel is removed');
+  assert(!JSON.stringify(config).includes('pcm_debug_display'),
+    'No hidden diagnostics remnants on the page');
+  const devices=sections[2].items.filter(x=>x.type==='checkboxgroup');
+  assert.strictEqual(devices.length,3,'One grouped control per device');
+  assert.strictEqual(devices[0].label,'Kitchen Lamp');
+  assert.strictEqual(devices[0].messageKey,'DEV_0');
+  assert.strictEqual(JSON.stringify(devices[0].options),JSON.stringify(['Favorite','Hide']));
+  assert.strictEqual(JSON.stringify(devices[0].defaultValue),JSON.stringify([false,false]),
+    'Existing saved selections become checkboxes');
+  assert(!sections[2].items.some(x=>x.messageKey&&/^(FAV_|HIDE_)/.test(x.messageKey)),
+    'No duplicate per-device toggle rows');
+  for(let i=0;i<48;i++)assert(manifest.pebble.messageKeys.includes('DEV_'+i+'[2]'),
+    'Every dynamic checkbox group must have a Pebble message-key array');
+
   h.handlers.webviewclosed({response:encodeURIComponent(JSON.stringify({
     DEV_0:{value:[true,true]}
   }))});
