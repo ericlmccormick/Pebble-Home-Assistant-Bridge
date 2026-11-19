@@ -105,16 +105,58 @@ function diagnosticsText(){
     lines.join('\n').replace(/&/g,'&amp;').replace(/</g,'&lt;')
       .replace(/>/g,'&gt;').replace(/"/g,'&quot;')+'</div>';
 }
-Pebble.addEventListener('showConfiguration',function(){
-  for(var i=0;i<clayConfig.length;i++){
-    var section=clayConfig[i];
-    if(!section.items)continue;
+var favoriteConfigRows=[];
+function favoriteIds(){
+  try { var ids=JSON.parse(localStorage.getItem('HA_FAVORITES_V1')||'[]');
+    return Array.isArray(ids)?ids.filter(function(v){return typeof v==='string';}):[];
+  } catch(e){return [];}
+}
+function controlKind(domain){
+  return {light:1,switch:2,input_boolean:2,fan:3,cover:4,scene:5,script:6,automation:7}[domain]||0;
+}
+function configureWithDevices(rows){
+  var cfg=clayConfig.slice();
+  var favoriteSet=favoriteIds();
+  favoriteConfigRows=rows.slice(0,48);
+  var items=[
+    {type:'heading',defaultValue:'Favorite devices'},
+    {type:'text',defaultValue:'Choose devices for the Favorites menu on the watch. Changes apply next time you open the list.'}
+  ];
+  var previousRoom='';
+  favoriteConfigRows.forEach(function(r,i){
+    if(r.room!==previousRoom){
+      previousRoom=r.room;
+      items.push({type:'heading',defaultValue:String(r.room||'Unassigned').slice(0,36)});
+    }
+    items.push({type:'toggle',messageKey:'FAV_'+i,
+      label:String(r.name||r.id).slice(0,65),defaultValue:favoriteSet.indexOf(r.id)>=0});
+  });
+  if(!favoriteConfigRows.length){
+    items.push({type:'text',defaultValue:'No devices loaded. Configure Home Assistant Bridge and reopen Settings.'});
+  }
+  cfg.splice(1,0,{type:'section',items:items});
+  cfg.forEach(function(section){
+    if(!section.items)return;
     section.items.forEach(function(item){
       if(item.id==='pcm_debug_display')item.defaultValue=diagnosticsText();
     });
-  }
-  clay=new Clay(clayConfig,null,{autoHandleEvents:false});
+  });
+  clay=new Clay(cfg,null,{autoHandleEvents:false});
   Pebble.openURL(clay.generateUrl());
+}
+Pebble.addEventListener('showConfiguration',function(){
+  pluginAction('list_controls',{}).then(function(result){
+    var rows=pluginJson(result);
+    if(!Array.isArray(rows))throw Error('No devices');
+    rows.sort(function(a,b){
+      var room=String(a.room||'').localeCompare(String(b.room||''));
+      return room||String(a.name||'').localeCompare(String(b.name||''));
+    });
+    configureWithDevices(rows);
+  }).catch(function(err){
+    console.log('Favorites discovery: '+String(err&&err.message||err));
+    configureWithDevices([]);
+  });
 });
 function sendWatchSettings(preview){
   Pebble.sendAppMessage({COMMAND:'SETTINGS',FONT_SIZE:fontSize,
@@ -129,6 +171,16 @@ Pebble.addEventListener('webviewclosed',function(e){
   var fields;
   try{fields=JSON.parse(decodeURIComponent(e.response));}catch(err){return;}
   function field(k){return fields[k]?fields[k].value:undefined;}
+  if(favoriteConfigRows.length){
+    var chosen=favoriteIds();
+    favoriteConfigRows.forEach(function(r,i){
+      var value=field('FAV_'+i);
+      if(value===undefined)return;
+      chosen=chosen.filter(function(id){return id!==r.id;});
+      if(valueBoolean(value,false))chosen.push(r.id);
+    });
+    localStorage.setItem('HA_FAVORITES_V1',JSON.stringify(chosen));
+  }
   if(field('ENABLE_TTS')!==undefined){
     enableTts=valueBoolean(field('ENABLE_TTS'),enableTts);
     localStorage.setItem('ENABLE_TTS',String(enableTts));
@@ -212,18 +264,39 @@ function controlSend(message,next){
     if(next)setTimeout(next,180);
   });
 }
-function controlLoad(){
+function visibleControls(rows,mode){
+  var fav=favoriteIds();
+  return rows.filter(function(r){
+    if(mode===1)return fav.indexOf(r.id)>=0;
+    if(mode===2)return /^(scene|script|automation)$/.test(r.domain);
+    return true;
+  }).sort(function(a,b){
+    if(mode===0){
+      var af=fav.indexOf(a.id)>=0,bf=fav.indexOf(b.id)>=0;
+      if(af!==bf)return af?-1:1;
+    }
+    return String(a.room||'').localeCompare(String(b.room||''))||
+      String(a.name||'').localeCompare(String(b.name||''));
+  }).slice(0,48);
+}
+function controlRow(r,index){
+  var fav=favoriteIds();
+  return {COMMAND:'CTRL_ROW',CTRL_INDEX:index,CTRL_ID:String(r.id||'').slice(0,62),
+    CTRL_NAME:String(r.name||'Device').slice(0,46),
+    CTRL_STATUS:String(r.state||'unknown').slice(0,26),
+    CTRL_ROOM:String(r.room||'Unassigned').slice(0,30),
+    CTRL_KIND:controlKind(r.domain),CTRL_FAV:fav.indexOf(r.id)>=0?1:0};
+}
+function controlLoad(mode){
   pluginAction('list_controls',{}).then(function(result){
     var rows=pluginJson(result);
     if(!Array.isArray(rows))throw Error('Bridge returned no controllable entities');
-    controlRows=rows.slice(0,48);
+    controlRows=visibleControls(rows,mode);
     var i=0;
     function sendNext(){
       if(i>=controlRows.length){controlSend({COMMAND:'CTRL_DONE'});return;}
-      var r=controlRows[i],index=i++;
-      controlSend({COMMAND:'CTRL_ROW',CTRL_INDEX:index,CTRL_ID:String(r.id||'').slice(0,62),
-        CTRL_NAME:String(r.name||'Device').slice(0,46),
-        CTRL_STATUS:String(r.state||'unknown').slice(0,26)},sendNext);
+      var index=i++;
+      controlSend(controlRow(controlRows[index],index),sendNext);
     }
     sendNext();
   }).catch(function(err){
@@ -235,15 +308,12 @@ function controlAct(index){
   if(!r)return;
   pluginAction('control_entity',{entity_id:r.id}).then(function(result){
     pluginJson(result);
-    return pluginAction('list_controls',{});
+    return pluginAction('get_state',{entity_id:r.id});
   }).then(function(result){
-    var list=pluginJson(result);
-    if(!Array.isArray(list))throw Error('Invalid state list');
-    var fresh=list.find(function(x){return x.id===r.id;});
-    if(fresh){
-      r.state=fresh.state;
-      controlSend({COMMAND:'CTRL_ROW',CTRL_INDEX:index,CTRL_ID:r.id.slice(0,62),
-        CTRL_NAME:String(r.name).slice(0,46),CTRL_STATUS:String(r.state).slice(0,26)});
+    var fresh=pluginJson(result);
+    if(fresh&&fresh.state!==undefined){
+      r.state=String(fresh.state);
+      controlSend(controlRow(r,index));
     }
     controlSend({COMMAND:'CTRL_DONE'});
   }).catch(function(err){
@@ -254,7 +324,7 @@ function controlAct(index){
 Pebble.addEventListener('appmessage',function(event){
   var d=event.payload||{};
   if(audio.handleMessage(d))return;
-  if(d.COMMAND==='CTRL_REQUEST'){controlLoad();return;}
+  if(d.COMMAND==='CTRL_REQUEST'){controlLoad(Number(d.CTRL_INDEX)||0);return;}
   if(d.COMMAND==='CTRL_ACT'){controlAct(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND!=='DICTATION'&&d.COMMAND!=='CONV_DICTATION')return;
   var legacy=d.COMMAND==='CONV_DICTATION';
