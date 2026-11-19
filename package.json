@@ -108,6 +108,6 @@
       }
     ]
   },
-  "version": "1.4.0",
-  "description": "Home Assistant Control Center with accessible text sizes and Weather+ automatic day/night theme"
+  "version": "1.4.1",
+  "description": "Home Assistant Control Center with accessible typography and audited day/night text and icon contrast"
 }
