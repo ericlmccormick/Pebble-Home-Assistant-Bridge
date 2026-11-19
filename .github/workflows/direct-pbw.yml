@@ -2,7 +2,7 @@ name: Build and publish direct PBW
 on:
   workflow_dispatch:
   push:
-    branches: [continuous-native-conversation, feature/ha-control-center-ui]
+    branches: [continuous-native-conversation, feature/ha-room-navigation]
     paths:
       - 'package.json'
       - 'src/**'
@@ -63,13 +63,13 @@ jobs:
           path: direct-download/home-assistant-ai.pbw
           if-no-files-found: error
       - name: Publish directly installable PBW to GitHub Releases
-        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/feature/ha-control-center-ui'
+        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/feature/ha-room-navigation'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG=dev-ha-control-center-ui
-          if [[ "$GITHUB_REF_NAME" != "feature/ha-control-center-ui" ]]; then TAG=dev-continuous-native-conversation; fi
+          TAG=dev-ha-room-navigation
+          if [[ "$GITHUB_REF_NAME" != "feature/ha-room-navigation" ]]; then TAG=dev-continuous-native-conversation; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" \
               --title "Latest development PBW" --prerelease \
