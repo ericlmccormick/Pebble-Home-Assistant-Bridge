@@ -32,9 +32,10 @@ static uint8_t s_visible[CONTROL_MAX];
 static int s_visible_count=0, s_room_count=0;
 static char s_rooms[CONTROL_MAX][ROOM_LEN];
 static uint8_t s_room_sizes[CONTROL_MAX];
+static uint8_t s_room_starts[CONTROL_MAX];
 static bool s_loading=false;
-static Window *s_home=NULL,*s_list=NULL,*s_room_window=NULL;
-static MenuLayer *s_home_menu=NULL,*s_menu=NULL,*s_room_menu=NULL;
+static Window *s_home=NULL,*s_list=NULL;
+static MenuLayer *s_home_menu=NULL,*s_menu=NULL;
 static TextLayer *s_hint=NULL;
 static char s_hint_text[64]="Select: toggle or run";
 static int32_t s_catalog_revision=0;
@@ -71,7 +72,6 @@ void controls_apply_settings(bool large,bool dark){
   s_large_text=large;s_night_theme=dark;
   refresh_menu(s_home_menu,s_home);
   refresh_menu(s_menu,s_list);
-  refresh_menu(s_room_menu,s_room_window);
   if(s_hint){
     text_layer_set_background_color(s_hint,ui_bg());
     text_layer_set_text_color(s_hint,ui_fg());
@@ -196,6 +196,15 @@ static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted){
       graphics_draw_circle(ctx,c,7);
   }
 }
+// Device rows remain indexed by the phone's original catalog order. Room
+// headers are visual MenuLayer sections and MUST NOT change CTRL_ACT indices.
+static int catalog_index_for(MenuIndex *idx){
+  if(s_mode!=0)return idx->row<s_visible_count?s_visible[idx->row]:-1;
+  if(s_room_count==0||idx->section>=s_room_count)return -1;
+  int visible_index=s_room_starts[idx->section]+idx->row;
+  if(idx->row>=s_room_sizes[idx->section]||visible_index>=s_visible_count)return -1;
+  return s_visible[visible_index];
+}
 static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
   bool active=menu_cell_layer_is_highlighted(cell);
@@ -206,8 +215,9 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
       GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
     return;
   }
-  if(idx->row>=s_visible_count)return;
-  ControlRow *r=&s_rows[s_visible[idx->row]];
+  int catalog_index=catalog_index_for(idx);
+  if(catalog_index<0)return;
+  ControlRow *r=&s_rows[catalog_index];
   int x=PBL_IF_ROUND_ELSE(35,8);
   paint_badge(ctx,GPoint(x+13,b.size.h/2),r->kind,active);
   int left=x+33,wide=b.size.w-left-PBL_IF_ROUND_ELSE(34,8);
@@ -280,7 +290,6 @@ static void visible_rebuild(void){
       s_mode==2?(s_rows[i].kind==5||s_rows[i].kind==6||s_rows[i].kind==7):true;
     if(include)s_visible[s_visible_count++]=(uint8_t)i;
   }
-  if(s_menu)menu_layer_reload_data(s_menu);
 }
 static bool catalog_refresh_due(void){
   time_t now=time(NULL);
@@ -291,11 +300,38 @@ static void catalog_request_if_due(void){
   if(s_sync_pending||!catalog_refresh_due())return;
   s_sync_pending=send_command("CTRL_REQUEST",s_mode);
 }
-static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){return s_visible_count?s_visible_count:1;}
+static uint16_t num_sections(MenuLayer *m,void *data){
+  return s_mode==0&&s_room_count>0?s_room_count:1;
+}
+static int16_t room_header_height(MenuLayer *m,uint16_t section,void *data){
+  return s_mode==0&&s_room_count>0?(s_large_text?28:24):0;
+}
+static void draw_room_header(GContext *ctx,const Layer *cell,uint16_t section,void *data){
+  if(s_mode!=0||section>=s_room_count)return;
+  GRect b=layer_get_bounds(cell);
+  char title[ROOM_LEN];
+  snprintf(title,sizeof(title),"%s",s_rooms[section]);
+  // Match Google Home's quiet, uppercase room dividers without changing IDs.
+  for(char *p=title;*p;p++)if(*p>='a'&&*p<='z')*p-=('a'-'A');
+  graphics_context_set_text_color(ctx,ui_muted());
+  graphics_draw_text(ctx,title,
+    fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_18_BOLD:FONT_KEY_GOTHIC_14_BOLD),
+    GRect(PBL_IF_ROUND_ELSE(24,8),s_large_text?1:2,
+      b.size.w-PBL_IF_ROUND_ELSE(48,16),s_large_text?27:22),
+    GTextOverflowModeTrailingEllipsis,
+    PBL_IF_ROUND_ELSE(GTextAlignmentCenter,GTextAlignmentLeft),NULL);
+}
+static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){
+  if(s_mode==0&&s_room_count>0)
+    return section<s_room_count?s_room_sizes[section]:0;
+  return section==0?(s_visible_count?s_visible_count:1):0;
+}
+
 static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){return row_height();}
 static void select_row(MenuLayer *m,MenuIndex *idx,void *data){
-  if(idx->row>=s_visible_count)return;
-  bool queued=send_command("CTRL_ACT",s_visible[idx->row]);
+  int catalog_index=catalog_index_for(idx);
+  if(catalog_index<0)return;
+  bool queued=send_command("CTRL_ACT",catalog_index);
   snprintf(s_hint_text,sizeof(s_hint_text),"%s",queued?"Sending command...":"Phone busy, retry");
   if(s_hint)text_layer_set_text(s_hint,s_hint_text);
 }
@@ -304,8 +340,9 @@ static void list_load(Window *w){
   window_set_background_color(w,ui_bg());
   s_menu=menu_layer_create(GRect(0,0,b.size.w,b.size.h-20));
   menu_layer_set_callbacks(s_menu,NULL,(MenuLayerCallbacks){
-    .get_num_rows=num_rows,.get_cell_height=cell_height,
-    .draw_row=draw_cell,.select_click=select_row
+    .get_num_sections=num_sections,.get_num_rows=num_rows,
+    .get_header_height=room_header_height,.get_cell_height=cell_height,
+    .draw_header=draw_room_header,.draw_row=draw_cell,.select_click=select_row
   });
   menu_layer_set_normal_colors(s_menu,ui_bg(),ui_fg());
   menu_layer_set_highlight_colors(s_menu,ui_selected_bg(),ui_selected_fg());
@@ -327,96 +364,36 @@ static void list_unload(Window *w){
   text_layer_destroy(s_hint);s_hint=NULL;
   window_destroy(s_list);s_list=NULL;
 }
+// The phone supplies sorted rooms. Construct visual sections over cached
+// rows; opening or scrolling them never causes another Bluetooth message.
 static void rooms_rebuild(void){
   s_room_count=0;
-  for(int i=0;i<s_count;i++){
-    int match=-1;
-    for(int j=0;j<s_room_count;j++)
-      if(strcmp(s_rooms[j],s_rows[i].room)==0){match=j;break;}
-    if(match<0&&s_room_count<CONTROL_MAX){
-      match=s_room_count++;
-      snprintf(s_rooms[match],ROOM_LEN,"%s",s_rows[i].room);
-      s_room_sizes[match]=0;
+  if(s_mode!=0)return;
+  for(int vi=0;vi<s_visible_count;vi++){
+    const ControlRow *r=&s_rows[s_visible[vi]];
+    bool new_room=s_room_count==0||
+      strcmp(s_rooms[s_room_count-1],r->room)!=0;
+    if(new_room){
+      if(s_room_count>=CONTROL_MAX)break;
+      snprintf(s_rooms[s_room_count],ROOM_LEN,"%s",r->room);
+      s_room_starts[s_room_count]=(uint8_t)vi;
+      s_room_sizes[s_room_count]=0;
+      s_room_count++;
     }
-    if(match>=0&&s_room_sizes[match]<255)s_room_sizes[match]++;
+    s_room_sizes[s_room_count-1]++;
   }
-  if(s_room_menu)menu_layer_reload_data(s_room_menu);
-}
-static uint16_t room_rows(MenuLayer *m,uint16_t sec,void *data){
-  return s_room_count?s_room_count:1;
-}
-static void room_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
-  GRect b=layer_get_bounds(cell);
-  if(!s_room_count){
-    menu_cell_basic_draw(ctx,cell,s_loading?"Finding rooms...":"No rooms found",
-      s_loading?"Reading Home Assistant areas":"Check Bridge settings",NULL);
-    return;
-  }
-  if(idx->row>=s_room_count)return;
-  bool active=menu_cell_layer_is_highlighted(cell);
-  paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,22),b.size.h/2),10,active);
-  int x=PBL_IF_ROUND_ELSE(61,45);
-  graphics_context_set_text_color(ctx,cell_fg(active));
-  graphics_draw_text(ctx,s_rooms[idx->row],title_font(),
-    GRect(x,title_top(),b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
-  char summary[32];
-  snprintf(summary,sizeof(summary),"%d device%s",s_room_sizes[idx->row],
-    s_room_sizes[idx->row]==1?"":"s");
-  graphics_context_set_text_color(ctx,cell_sub(active));
-  graphics_draw_text(ctx,summary,sub_font(),
-    GRect(x,sub_top(),b.size.w-x-7,20),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
-}
-static void list_push(void){
-  if(s_list)return;
-  s_list=window_create();
-  window_set_window_handlers(s_list,(WindowHandlers){.load=list_load,.unload=list_unload});
-  window_stack_push(s_list,true);
-}
-static void room_select(MenuLayer *m,MenuIndex *idx,void *data){
-  if(idx->row>=s_room_count)return;
-  s_visible_count=0;
-  for(int i=0;i<s_count;i++){
-    if(strcmp(s_rows[i].room,s_rooms[idx->row])==0)
-      s_visible[s_visible_count++]=(uint8_t)i;
-  }
-  snprintf(s_hint_text,sizeof(s_hint_text),"%s",s_rooms[idx->row]);
-  list_push();
-}
-static void room_load(Window *w){
-  GRect b=layer_get_bounds(window_get_root_layer(w));
-  window_set_background_color(w,ui_bg());
-  s_room_menu=menu_layer_create(b);
-  menu_layer_set_callbacks(s_room_menu,NULL,(MenuLayerCallbacks){
-    .get_num_rows=room_rows,.get_cell_height=cell_height,
-    .draw_row=room_draw,.select_click=room_select
-  });
-  menu_layer_set_normal_colors(s_room_menu,ui_bg(),ui_fg());
-  menu_layer_set_highlight_colors(s_room_menu,ui_selected_bg(),ui_selected_fg());
-#ifdef PBL_ROUND
-  menu_layer_set_center_focused(s_room_menu,true);
-#endif
-  menu_layer_set_click_config_onto_window(s_room_menu,w);
-  layer_add_child(window_get_root_layer(w),menu_layer_get_layer(s_room_menu));
-}
-static void room_unload(Window *w){
-  menu_layer_destroy(s_room_menu);s_room_menu=NULL;
-  window_destroy(s_room_window);s_room_window=NULL;
 }
 void controls_open_mode(int mode){
-  if(s_list||s_room_window)return;
+  if(s_list)return;
   catalog_restore();
   s_mode=mode;
   s_loading=s_count==0;
-  if(mode==0){
-    rooms_rebuild();
-    s_room_window=window_create();
-    window_set_window_handlers(s_room_window,(WindowHandlers){.load=room_load,.unload=room_unload});
-    window_stack_push(s_room_window,true);
-  }else{
-    visible_rebuild();
-    snprintf(s_hint_text,sizeof(s_hint_text),"%s",mode==1?"Favorite devices":"Scenes and scripts");
-    list_push();
-  }
+  visible_rebuild();
+  rooms_rebuild();
+  snprintf(s_hint_text,sizeof(s_hint_text),"%s",
+    mode==0?"Select to control":mode==1?"Favorite devices":"Scenes and scripts");
+  // All modes use one scrollable list. Room headers are not selectable.
+  list_push();
   // Browsing locally cached rooms or favorites requires ZERO phone messages.
   catalog_request_if_due();
 }
@@ -557,8 +534,9 @@ void controls_receive(DictionaryIterator *iter,const char *command){
       s_catalog_dirty=false;
     }
     s_loading=false;s_sync_pending=false;
-    if(s_mode==0)rooms_rebuild();
-    else visible_rebuild();
+    visible_rebuild();
+    rooms_rebuild();
+    if(s_menu)menu_layer_reload_data(s_menu);
     if(s_hint)text_layer_set_text(s_hint,s_hint_text);
     return;
   }
@@ -574,7 +552,6 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     snprintf(s_hint_text,sizeof(s_hint_text),"%s",t?t->value->cstring:"Control failed");
     if(s_hint)text_layer_set_text(s_hint,s_hint_text);
     if(s_menu)menu_layer_reload_data(s_menu);
-    if(s_room_menu)menu_layer_reload_data(s_room_menu);
     return;
   }
 }
