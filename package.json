@@ -22,7 +22,10 @@
       "CTRL_INDEX",
       "CTRL_NAME",
       "CTRL_STATUS",
-      "CTRL_ID"
+      "CTRL_ID",
+      "CTRL_ROOM",
+      "CTRL_KIND",
+      "CTRL_FAV"
     ],
     "projectType": "native",
     "resources": {
@@ -100,6 +103,6 @@
       }
     ]
   },
-  "version": "1.1.0",
-  "description": "Pebble Home Assistant voice and quick device controls via Home Assistant Bridge"
+  "version": "1.2.0",
+  "description": "Home Assistant Control Center with device icons, rooms, favorites and existing voice AI"
 }
