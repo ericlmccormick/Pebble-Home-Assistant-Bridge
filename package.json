@@ -25,7 +25,9 @@
       "CTRL_ID",
       "CTRL_ROOM",
       "CTRL_KIND",
-      "CTRL_FAV"
+      "CTRL_FAV",
+      "LARGE_TEXT",
+      "THEME_DARK"
     ],
     "projectType": "native",
     "resources": {
@@ -100,9 +102,12 @@
       {
         "name": "HomeControl",
         "plugin": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57"
+      },
+      {
+        "name": "Location"
       }
     ]
   },
-  "version": "1.3.1",
-  "description": "Home Assistant Control Center with device icons, rooms, favorites and existing voice AI"
+  "version": "1.4.0",
+  "description": "Home Assistant Control Center with accessible text sizes and Weather+ automatic day/night theme"
 }
