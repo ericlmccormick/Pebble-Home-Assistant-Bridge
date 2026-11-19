@@ -214,7 +214,7 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   snprintf(subtitle,sizeof(subtitle),"%s  |  %s",r->room,r->state);
   graphics_context_set_text_color(ctx,cell_sub(active));
   graphics_draw_text(ctx,subtitle,sub_font(),
-    GRect(left,sub_top(),wide,24),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(left,sub_top(),wide,20),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   if(r->favorite){
     graphics_context_set_text_color(ctx,cell_sub(active));
     graphics_draw_text(ctx,"*",fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
@@ -361,7 +361,7 @@ static void room_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
     s_room_sizes[idx->row]==1?"":"s");
   graphics_context_set_text_color(ctx,cell_sub(active));
   graphics_draw_text(ctx,summary,sub_font(),
-    GRect(x,sub_top(),b.size.w-x-7,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(x,sub_top(),b.size.w-x-7,20),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
 }
 static void list_push(void){
   if(s_list)return;
