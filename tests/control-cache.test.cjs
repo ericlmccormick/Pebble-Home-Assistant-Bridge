@@ -99,8 +99,24 @@ async function flush(){for(let i=0;i<9;i++)await new Promise(resolve=>setImmedia
   const devices=sections[2].items.filter(x=>x.type==='checkboxgroup');
   assert.strictEqual(devices.length,3,'One grouped control per device');
   assert.strictEqual(devices[0].label,'Kitchen Lamp');
-  assert(JS.includes('flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:8px'),
-    'Native Clay checkboxes must be left of Favorite/Hide text, not right-justified');
+  assert(JS.includes('.component-checkbox{display:flex!important;align-items:center;gap:6px'),
+    'Device names and actions must share one horizontal row');
+  assert(JS.includes('font-size:14px!important')&&JS.includes('max-height:2.6em'),
+    'Device names use smaller two-line text when needed');
+  assert(JS.includes('.checkbox-group{display:flex;align-items:center;justify-content:flex-end'),
+    'Both action icons must be right-aligned');
+  assert(JS.includes('flex:0 0 44px')&&JS.includes('height:44px'),
+    'Each icon keeps a 44-pixel touch target');
+  assert(JS.includes('label:first-child i:before{content:"☆"')&&
+      JS.includes('label:first-child input:checked+i:before{content:"★"'),
+    'Star outlines/fills reflect native Favorite checkbox state');
+  assert(JS.includes('label:nth-child(2) i:before{content:""')&&
+      JS.includes('label:nth-child(2) i:after{content:""')&&
+      JS.includes('rotate(-45deg)')&&
+      JS.includes('label:nth-child(2) input:checked+i{color:#ff7a16'),
+    'Hide control must draw a slash-circle with inactive and active colors');
+  assert(JS.includes('label .label{position:absolute!important'),
+    'Native control labels remain accessible but do not consume visual space');
   assert.strictEqual(devices[0].messageKey,'DEV_0');
   assert.strictEqual(JSON.stringify(devices[0].options),JSON.stringify(['Favorite','Hide']));
   assert.strictEqual(JSON.stringify(devices[0].defaultValue),JSON.stringify([false,false]),
