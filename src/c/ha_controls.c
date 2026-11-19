@@ -225,7 +225,10 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   graphics_draw_text(ctx,r->name,title_font(),
     GRect(left,title_top(),wide-9,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char subtitle[70];
-  snprintf(subtitle,sizeof(subtitle),"%s  |  %s",r->room,r->state);
+  // In the room-grouped view the header already gives the room, so avoid
+  // repeating it on every device. Keep it in Favorites / Scenes & Scripts.
+  if(s_mode==0)snprintf(subtitle,sizeof(subtitle),"%s",r->state);
+  else snprintf(subtitle,sizeof(subtitle),"%s  |  %s",r->room,r->state);
   graphics_context_set_text_color(ctx,cell_sub(active));
   graphics_draw_text(ctx,subtitle,sub_font(),
     GRect(left,sub_top(),wide,20),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
