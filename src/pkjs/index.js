@@ -204,9 +204,58 @@ function askViaBridge(text,legacy,mute){
     if(gen===requestGeneration)replyError('Bridge: '+String(e.message||e),legacy);
   });
 }
+
+var controlRows=[];
+function controlSend(message,next){
+  Pebble.sendAppMessage(message,function(){if(next)next();},function(err){
+    console.log('Control row transport failed '+JSON.stringify(err));
+    if(next)setTimeout(next,180);
+  });
+}
+function controlLoad(){
+  pluginAction('list_controls',{}).then(function(result){
+    var rows=pluginJson(result);
+    if(!Array.isArray(rows))throw Error('Bridge returned no controllable entities');
+    controlRows=rows.slice(0,48);
+    var i=0;
+    function sendNext(){
+      if(i>=controlRows.length){controlSend({COMMAND:'CTRL_DONE'});return;}
+      var r=controlRows[i],index=i++;
+      controlSend({COMMAND:'CTRL_ROW',CTRL_INDEX:index,CTRL_ID:String(r.id||'').slice(0,62),
+        CTRL_NAME:String(r.name||'Device').slice(0,46),
+        CTRL_STATUS:String(r.state||'unknown').slice(0,26)},sendNext);
+    }
+    sendNext();
+  }).catch(function(err){
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
+  });
+}
+function controlAct(index){
+  var r=controlRows[index];
+  if(!r)return;
+  pluginAction('control_entity',{entity_id:r.id}).then(function(result){
+    pluginJson(result);
+    return pluginAction('list_controls',{});
+  }).then(function(result){
+    var list=pluginJson(result);
+    if(!Array.isArray(list))throw Error('Invalid state list');
+    var fresh=list.find(function(x){return x.id===r.id;});
+    if(fresh){
+      r.state=fresh.state;
+      controlSend({COMMAND:'CTRL_ROW',CTRL_INDEX:index,CTRL_ID:r.id.slice(0,62),
+        CTRL_NAME:String(r.name).slice(0,46),CTRL_STATUS:String(r.state).slice(0,26)});
+    }
+    controlSend({COMMAND:'CTRL_DONE'});
+  }).catch(function(err){
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
+  });
+}
+
 Pebble.addEventListener('appmessage',function(event){
   var d=event.payload||{};
   if(audio.handleMessage(d))return;
+  if(d.COMMAND==='CTRL_REQUEST'){controlLoad();return;}
+  if(d.COMMAND==='CTRL_ACT'){controlAct(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND!=='DICTATION'&&d.COMMAND!=='CONV_DICTATION')return;
   var legacy=d.COMMAND==='CONV_DICTATION';
   if(!d.TEXT){replyError('No dictation captured',legacy);return;}
