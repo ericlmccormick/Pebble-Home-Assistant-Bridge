@@ -5,6 +5,7 @@
 #include <pebble.h>
 #include "ha_audio.h"
 void controls_open(void);
+void controls_home_open(void);
 void controls_receive(DictionaryIterator *iter,const char *command);
 static void open_devices(ClickRecognizerRef recognizer, void *context) { controls_open(); }
 // The plugin API does not expose a raw, continuous microphone stream.
@@ -263,7 +264,7 @@ static void exit_back_click_handler(ClickRecognizerRef recognizer, void *context
   if (s_current_state == UI_STATE_THINKING) {
     return;
   }
-  window_stack_pop(true);
+  controls_home_open();
 }
 
 static void results_back_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -284,7 +285,6 @@ static void window_click_config_provider(void *context) {
     
     window_single_click_subscribe(BUTTON_ID_SELECT, select_short_click_handler);
     window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL);
-    window_single_click_subscribe(BUTTON_ID_UP, open_devices);
 
     #ifdef PBL_SPEAKER
       window_long_click_subscribe(BUTTON_ID_UP, 500, up_volume_handler, NULL);
@@ -708,7 +708,8 @@ static void init() {
   });
   
   window_set_click_config_provider(s_main_window, window_click_config_provider);
-  window_stack_push(s_main_window, true);       
+  window_stack_push(s_main_window, true);
+  controls_home_open();
 }
 
 static void deinit() {
