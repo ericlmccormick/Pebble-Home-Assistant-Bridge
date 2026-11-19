@@ -48,10 +48,12 @@ assert(!controls.includes('active?GColorBlack:PBL_IF_COLOR_ELSE(GColorLightGray,
 for (const color of ['GColorJaegerGreen','GColorBlueMoon','GColorPurple']) {
   assert(!controls.includes('return '+color+';'), 'Dark badge fill with black pictogram: '+color);
 }
-for (const m of ['s_home_menu','s_room_menu','s_menu']) {
+for (const m of ['s_home_menu','s_menu']) {
   assert(controls.includes('menu_layer_set_normal_colors('+m+',ui_bg(),ui_fg());'));
   assert(controls.includes('menu_layer_set_highlight_colors('+m+',ui_selected_bg(),ui_selected_fg());'));
 }
+assert(controls.includes('graphics_context_set_text_color(ctx,ui_muted());'),
+  'Room section labels follow the day/night muted text palette');
 assert(controls.includes('graphics_context_set_text_color(ctx,cell_sub(active));'),
   'Secondary lines must have themed foreground');
 assert(voice.includes('text_layer_set_text_color(s_thinking_transcript_layer,s_theme_dark?GColorWhite:GColorBlack)'),
