@@ -89,6 +89,14 @@
       {
         "name": "InvokeAction",
         "plugin": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57"
+      },
+      {
+        "name": "HomeRead",
+        "plugin": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57"
+      },
+      {
+        "name": "HomeControl",
+        "plugin": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57"
       }
     ]
   },
