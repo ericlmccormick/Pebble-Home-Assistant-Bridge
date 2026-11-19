@@ -22,6 +22,10 @@ typedef struct {
   uint8_t kind;
   bool favorite;
 } ControlRow;
+typedef char cache_row_chunk_fits_persist_value[
+  sizeof(ControlRow)*CACHE_ROWS_PER_KEY<=PERSIST_DATA_MAX_LENGTH?1:-1];
+typedef char cache_catalog_fits_minimum_quota[
+  sizeof(ControlRow)*CONTROL_MAX+16*20+128<4096?1:-1];
 static ControlRow s_rows[CONTROL_MAX];
 static int s_count=0, s_mode=0; // 0: rooms; 1: favorites; 2: scenes/scripts
 static uint8_t s_visible[CONTROL_MAX];
@@ -280,7 +284,7 @@ static void visible_rebuild(void){
 }
 static bool catalog_refresh_due(void){
   time_t now=time(NULL);
-  return s_catalog_revision==0||s_count==0||s_last_sync_at==0||now<s_last_sync_at||
+  return s_catalog_revision==0||s_last_sync_at==0||now<s_last_sync_at||
     (now-s_last_sync_at)>=CACHE_REFRESH_SECONDS;
 }
 static void catalog_request_if_due(void){
@@ -537,10 +541,11 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     if(count&&rev){
       int n=count->value->int32;
       if(n<0||n>CONTROL_MAX)return;
+      bool changed=s_catalog_dirty||n!=s_count;
       s_count=n;
       s_catalog_revision=rev->value->int32;
       s_last_sync_at=time(NULL);
-      if(s_catalog_dirty){
+      if(changed){
         if(!catalog_store()){
           s_catalog_revision=0;
           persist_write_int(CACHE_REV_KEY,0);
