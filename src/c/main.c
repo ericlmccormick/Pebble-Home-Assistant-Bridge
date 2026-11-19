@@ -4,6 +4,9 @@
 
 #include <pebble.h>
 #include "ha_audio.h"
+void controls_open(void);
+void controls_receive(DictionaryIterator *iter,const char *command);
+static void open_devices(ClickRecognizerRef recognizer, void *context) { controls_open(); }
 // The plugin API does not expose a raw, continuous microphone stream.
 // All voice input uses PebbleOS system dictation and Bridge conversation.
 #define MAX_TEXT_LENGTH 2048
@@ -280,9 +283,9 @@ static void window_click_config_provider(void *context) {
     window_single_repeating_click_subscribe(BUTTON_ID_DOWN, 100, (ClickHandler) scroll_layer_scroll_down_click_handler);
     
     window_single_click_subscribe(BUTTON_ID_SELECT, select_short_click_handler);
-    window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL); 
- 
-    
+    window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL);
+    window_single_click_subscribe(BUTTON_ID_UP, open_devices);
+
     #ifdef PBL_SPEAKER
       window_long_click_subscribe(BUTTON_ID_UP, 500, up_volume_handler, NULL);
       window_long_click_subscribe(BUTTON_ID_DOWN, 500, down_volume_handler, NULL);
@@ -290,9 +293,9 @@ static void window_click_config_provider(void *context) {
   } else {
     window_single_click_subscribe(BUTTON_ID_BACK, exit_back_click_handler);
     window_single_click_subscribe(BUTTON_ID_SELECT, select_short_click_handler);
-    window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL); 
- 
-    
+    window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL);
+    window_single_click_subscribe(BUTTON_ID_UP, open_devices);
+
     #ifdef PBL_SPEAKER
       window_single_click_subscribe(BUTTON_ID_UP, up_volume_handler);    
       window_single_click_subscribe(BUTTON_ID_DOWN, down_volume_handler);  
@@ -363,6 +366,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   Tuple *command_tuple = dict_find(iterator, MESSAGE_KEY_COMMAND); 
   if (!command_tuple) return;                   
 
+  if (strncmp(command_tuple->value->cstring, "CTRL_", 5) == 0) { controls_receive(iterator,command_tuple->value->cstring); return; }
   if (strncmp(command_tuple->value->cstring, "TEXT_RESPONSE", 13) == 0) {
     bool no_audio=strcmp(command_tuple->value->cstring,"TEXT_RESPONSE_NO_AUDIO")==0;
     if(no_audio)ha_audio_stop();
