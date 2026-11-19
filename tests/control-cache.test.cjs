@@ -88,7 +88,7 @@ async function flush(){for(let i=0;i<9;i++)await new Promise(resolve=>setImmedia
   h.handlers.showConfiguration();
   assert.strictEqual(h.opened.length,1,'Cached settings open without waiting for Bridge');
   h.handlers.webviewclosed({response:encodeURIComponent(JSON.stringify({
-    FAV_0:{value:true},HIDE_0:{value:true}
+    DEV_0:{value:[true,true]}
   }))});
   assert(JSON.parse(storage.HA_FAVORITES_V1).includes('light.kitchen'));
   assert(JSON.parse(storage.HA_HIDDEN_V1).includes('light.kitchen'));
