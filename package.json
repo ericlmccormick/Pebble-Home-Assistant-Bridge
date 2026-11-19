@@ -158,6 +158,6 @@
       }
     ]
   },
-  "version": "1.5.3",
-  "description": "Home Assistant Control Center with compact Google Home-style star and hide icon settings"
+  "version": "1.5.4",
+  "description": "Home Assistant Control Center with Google Home-style inline room headers and direct device access"
 }
