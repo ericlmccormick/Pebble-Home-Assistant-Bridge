@@ -18,7 +18,11 @@
       "FONT_SIZE",
       "VOLUME",
       "AUTO_SEND",
-      "HAPTIC_LEVEL"
+      "HAPTIC_LEVEL",
+      "CTRL_INDEX",
+      "CTRL_NAME",
+      "CTRL_STATUS",
+      "CTRL_ID"
     ],
     "projectType": "native",
     "resources": {
@@ -88,6 +92,6 @@
       }
     ]
   },
-  "version": "1.0.0",
-  "description": "Pebble Home Assistant voice app powered exclusively by the Home Assistant Bridge plugin and its reusable audio SDK"
+  "version": "1.1.0",
+  "description": "Pebble Home Assistant voice and quick device controls via Home Assistant Bridge"
 }
