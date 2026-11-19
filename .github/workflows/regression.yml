@@ -22,6 +22,8 @@ jobs:
         run: node tests/sentence-prefetch.test.cjs
       - name: Day and night text, icon and selection contrast
         run: node tests/theme-contrast.test.cjs
+      - name: Offline catalog, scene actions, and visibility regression
+        run: node tests/control-cache.test.cjs
       - name: Static watch SDK interface validation
         run: |
           python3 - <<'PY'
