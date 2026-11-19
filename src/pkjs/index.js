@@ -8,7 +8,70 @@ var hapticValues={off:0,low:1,medium:2,high:3};
 var hapticLevel=localStorage.getItem('HAPTIC_LEVEL')||'medium';
 var autoSend=localStorage.getItem('AUTO_SEND')!=='false';
 var enableTts=localStorage.getItem('ENABLE_TTS')!=='false';
-var fontSize=parseInt(localStorage.getItem('FONT_SIZE')||'24',10);
+var fontChoice=localStorage.getItem('FONT_CHOICE')||((parseInt(localStorage.getItem('FONT_SIZE')||'24',10)>24)?'large':'normal');
+var themeMode=localStorage.getItem('HA_THEME_MODE')||'auto';
+var WEATHER_PLUGIN_UUID='7f7b6c10-93e0-4f4c-9237-7e8204c5a121';
+var weatherSource=null;
+var weatherSunrise=0,weatherSunset=0;
+var weatherUpdatedAt=0;
+try {
+  var weatherSaved=JSON.parse(localStorage.getItem('HA_WEATHER_SUN_V1')||'null');
+  if(weatherSaved&&Number(weatherSaved.savedAt)>Date.now()-24*3600*1000){
+    weatherSunrise=Number(weatherSaved.sunrise)||0;
+    weatherSunset=Number(weatherSaved.sunset)||0;
+    weatherUpdatedAt=Number(weatherSaved.savedAt)||0;
+  }
+}catch(e){}
+var themeDarkSent=null,settingsReady=false;
+function sunEpoch(v){
+  if(v&&v.timestamp&&v.timestamp.value!=null)v=v.timestamp.value;
+  var n=Number(v);
+  if(!isFinite(n)||n<1000000000)return 0;
+  return n>1e12?Math.floor(n/1000):Math.floor(n);
+}
+function effectiveThemeDark(){
+  if(themeMode==='night')return true;
+  if(themeMode==='day')return false;
+  // In Auto, follow Weather+ local sunrise/sunset. Never force an
+  // arbitrary 6 AM / 6 PM schedule when solar data is absent.
+  var now=Math.floor(Date.now()/1000);
+  if(weatherSunrise>0&&weatherSunset>weatherSunrise&&Date.now()-weatherUpdatedAt<24*3600*1000)
+    return now<weatherSunrise||now>=weatherSunset;
+  // Deterministic fallback without a Weather+ source: system appearance
+  // is not observable in PebbleKit JS; retain last cached theme or day.
+  return localStorage.getItem('HA_LAST_AUTO_DARK')==='true';
+}
+function onWeatherEnvelope(data){
+  var instances=data&&data.instances||[];
+  var props=instances[0]&&instances[0].properties||{};
+  var sunrise=sunEpoch(props.sunrise),sunset=sunEpoch(props.sunset);
+  if(!sunrise||!sunset||sunset<=sunrise)return;
+  weatherSunrise=sunrise;weatherSunset=sunset;weatherUpdatedAt=Date.now();
+  localStorage.setItem('HA_WEATHER_SUN_V1',JSON.stringify({
+    sunrise:sunrise,sunset:sunset,savedAt:weatherUpdatedAt}));
+  localStorage.setItem('HA_LAST_AUTO_DARK',String(effectiveThemeDark()));
+  if(settingsReady)sendWatchSettings(false);
+}
+function weatherSubscribe(){
+  if(themeMode!=='auto'||typeof Pebble.subscribeToSource!=='function')return;
+  if(weatherSource)return;
+  try{
+    weatherSource=Pebble.subscribeToSource({
+      category:'weather',item:'location',plugin:WEATHER_PLUGIN_UUID,
+      properties:['sunrise','sunset','updated_at'],
+      onData:onWeatherEnvelope,
+      onError:function(e){console.log('Weather+ auto theme unavailable: '+String(e&&e.code||'source error'));}
+    });
+  }catch(e){console.log('Weather+ subscription unavailable: '+String(e&&e.message||e));}
+}
+function weatherStop(){
+  if(weatherSource&&typeof weatherSource.unsubscribe==='function')weatherSource.unsubscribe();
+  weatherSource=null;
+}
+function updateWeatherSubscription(){
+  if(themeMode==='auto')weatherSubscribe();else weatherStop();
+}
+
 var conversationId=localStorage.getItem('HA_CONVERSATION_ID')||'';
 var requestGeneration=0,legacyConversationTurn=false,lastAnswer='';
 var hasSpeaker=false;
@@ -63,8 +126,14 @@ var clayConfig=[
   ]},
   {type:'section',items:[
     {type:'heading',defaultValue:'Display'},
-    {type:'slider',messageKey:'FONT_SIZE',label:'Font size',
-      defaultValue:fontSize,min:14,max:28,step:2},
+    {type:'select',messageKey:'FONT_CHOICE',label:'Text size',
+      defaultValue:fontChoice,
+      options:[{label:'Normal',value:'normal'},{label:'Large',value:'large'}]},
+    {type:'select',messageKey:'THEME_MODE',label:'Theme',
+      defaultValue:themeMode,
+      options:[{label:'Day',value:'day'},{label:'Night',value:'night'},
+        {label:'Auto (Weather+ sunrise/sunset)',value:'auto'}]},
+    {type:'text',defaultValue:'Auto requires Weather+ installed. Without solar times, the last known appearance is retained.'},
     {type:'select',messageKey:'HAPTIC_LEVEL',label:'Vibration feedback',
       defaultValue:hapticLevel,
       options:[{label:'Off',value:'off'},{label:'Low - short',value:'low'},
@@ -174,7 +243,12 @@ Pebble.addEventListener('showConfiguration',function(){
   });
 });
 function sendWatchSettings(preview){
-  Pebble.sendAppMessage({COMMAND:'SETTINGS',FONT_SIZE:fontSize,
+  var dark=effectiveThemeDark();
+  themeDarkSent=dark;
+  if(themeMode==='auto'&&weatherSunrise&&weatherSunset)
+    localStorage.setItem('HA_LAST_AUTO_DARK',String(dark));
+  Pebble.sendAppMessage({COMMAND:'SETTINGS',FONT_SIZE:fontChoice==='large'?28:24,
+    LARGE_TEXT:fontChoice==='large'?1:0,THEME_DARK:dark?1:0,
     AUTO_SEND:autoSend?1:0,HAPTIC_LEVEL:hapticValues[hapticLevel]||0},
     function(){
       if(preview)Pebble.sendAppMessage({COMMAND:'HAPTIC_PREVIEW',
@@ -207,9 +281,16 @@ Pebble.addEventListener('webviewclosed',function(e){
   if(field('RESET_CHAT')!==undefined && valueBoolean(field('RESET_CHAT'),false)){
     conversationId='';localStorage.removeItem('HA_CONVERSATION_ID');
   }
-  if(field('FONT_SIZE')!==undefined){
-    fontSize=parseInt(field('FONT_SIZE'),10)||24;
-    localStorage.setItem('FONT_SIZE',String(fontSize));
+  if(field('FONT_CHOICE')!==undefined){
+    fontChoice=String(field('FONT_CHOICE'))==='large'?'large':'normal';
+    localStorage.setItem('FONT_CHOICE',fontChoice);
+    localStorage.setItem('FONT_SIZE',String(fontChoice==='large'?28:24));
+  }
+  if(field('THEME_MODE')!==undefined){
+    var value=String(field('THEME_MODE'));
+    themeMode=/^(day|night|auto)$/.test(value)?value:'auto';
+    localStorage.setItem('HA_THEME_MODE',themeMode);
+    updateWeatherSubscription();
   }
   if(field('HAPTIC_LEVEL')!==undefined){
     var next=String(field('HAPTIC_LEVEL'));
@@ -221,7 +302,16 @@ Pebble.addEventListener('webviewclosed',function(e){
   }
   sendWatchSettings(false);
 });
-Pebble.addEventListener('ready',function(){sendWatchSettings(false);});
+Pebble.addEventListener('ready',function(){
+  settingsReady=true;
+  sendWatchSettings(false);
+  updateWeatherSubscription();
+  // Check for sunrise/sunset transitions without refreshing the weather
+  // feed or redrawing the watch unnecessarily.
+  setInterval(function(){
+    if(themeMode==='auto'&&effectiveThemeDark()!==themeDarkSent)sendWatchSettings(false);
+  },15*60*1000);
+});
 function pluginAction(action,args){
   return Pebble.invokeAction({plugin:HA_PLUGIN_UUID,action:action,args:args});
 }
