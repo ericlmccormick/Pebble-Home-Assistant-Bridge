@@ -99,6 +99,8 @@ async function flush(){for(let i=0;i<9;i++)await new Promise(resolve=>setImmedia
   const devices=sections[2].items.filter(x=>x.type==='checkboxgroup');
   assert.strictEqual(devices.length,3,'One grouped control per device');
   assert.strictEqual(devices[0].label,'Kitchen Lamp');
+  assert(JS.includes('flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:8px'),
+    'Native Clay checkboxes must be left of Favorite/Hide text, not right-justified');
   assert.strictEqual(devices[0].messageKey,'DEV_0');
   assert.strictEqual(JSON.stringify(devices[0].options),JSON.stringify(['Favorite','Hide']));
   assert.strictEqual(JSON.stringify(devices[0].defaultValue),JSON.stringify([false,false]),
