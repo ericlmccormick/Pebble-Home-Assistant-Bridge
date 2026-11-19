@@ -304,6 +304,25 @@ static void home_select(MenuLayer *m,MenuIndex *idx,void *ctx){
     case 3:controls_open_mode(2);break;
   }
 }
+static void home_up_click(ClickRecognizerRef recognizer,void *context){
+  if(s_home_menu)menu_layer_set_selected_next(s_home_menu,true,MenuRowAlignCenter,true);
+}
+static void home_down_click(ClickRecognizerRef recognizer,void *context){
+  if(s_home_menu)menu_layer_set_selected_next(s_home_menu,false,MenuRowAlignCenter,true);
+}
+static void home_select_click(ClickRecognizerRef recognizer,void *context){
+  if(!s_home_menu)return;
+  MenuIndex index=menu_layer_get_selected_index(s_home_menu);
+  home_select(s_home_menu,&index,NULL);
+}
+// All click subscriptions MUST be made from a ClickConfigProvider.
+// Installing one in home_load() triggered a Pebble runtime assertion.
+static void home_click_config(void *context){
+  window_single_click_subscribe(BUTTON_ID_UP,home_up_click);
+  window_single_click_subscribe(BUTTON_ID_DOWN,home_down_click);
+  window_single_click_subscribe(BUTTON_ID_SELECT,home_select_click);
+  window_single_click_subscribe(BUTTON_ID_BACK,home_back_handler);
+}
 static void home_load(Window *w){
   GRect b=layer_get_bounds(window_get_root_layer(w));
   window_set_background_color(w,GColorBlack);
@@ -317,8 +336,7 @@ static void home_load(Window *w){
 #ifdef PBL_ROUND
   menu_layer_set_center_focused(s_home_menu,true);
 #endif
-  menu_layer_set_click_config_onto_window(s_home_menu,w);
-  window_single_click_subscribe(BUTTON_ID_BACK,home_back_handler);
+  window_set_click_config_provider(w,home_click_config);
   layer_add_child(window_get_root_layer(w),menu_layer_get_layer(s_home_menu));
 }
 static void home_unload(Window *w){
