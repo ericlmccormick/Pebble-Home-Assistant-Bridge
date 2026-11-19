@@ -2,7 +2,7 @@ name: Build and publish direct PBW
 on:
   workflow_dispatch:
   push:
-    branches: [continuous-native-conversation, feature/watch-cache-visibility-layout]
+    branches: [continuous-native-conversation, feature/compact-device-settings]
     paths:
       - 'package.json'
       - 'src/**'
@@ -65,13 +65,13 @@ jobs:
           path: direct-download/home-assistant-ai.pbw
           if-no-files-found: error
       - name: Publish directly installable PBW to GitHub Releases
-        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/feature/watch-cache-visibility-layout'
+        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/feature/compact-device-settings'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG=dev-watch-cache-visibility-layout
-          if [[ "$GITHUB_REF_NAME" != "feature/watch-cache-visibility-layout" ]]; then TAG=dev-continuous-native-conversation; fi
+          TAG=dev-compact-device-settings
+          if [[ "$GITHUB_REF_NAME" != "feature/compact-device-settings" ]]; then TAG=dev-continuous-native-conversation; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" \
               --title "Latest development PBW" --prerelease \
