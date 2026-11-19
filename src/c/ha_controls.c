@@ -74,15 +74,15 @@ void controls_apply_settings(bool large,bool dark){
     text_layer_set_font(s_hint,sub_font());
   }
 }
-static void send_command(const char *command,int index){
+static bool send_command(const char *command,int index){
   DictionaryIterator *out=NULL;
-  if(app_message_outbox_begin(&out)!=APP_MSG_OK||!out)return;
+  if(app_message_outbox_begin(&out)!=APP_MSG_OK||!out)return false;
   dict_write_cstring(out,MESSAGE_KEY_COMMAND,command);
   if(index>=0)dict_write_int32(out,MESSAGE_KEY_CTRL_INDEX,index);
   if(strcmp(command,"CTRL_REQUEST")==0)
     dict_write_int32(out,MESSAGE_KEY_CTRL_REV,s_catalog_revision);
   dict_write_end(out);
-  app_message_outbox_send();
+  return app_message_outbox_send()==APP_MSG_OK;
 }
 static GColor kind_color(uint8_t kind){
 #ifdef PBL_COLOR
@@ -285,15 +285,14 @@ static bool catalog_refresh_due(void){
 }
 static void catalog_request_if_due(void){
   if(s_sync_pending||!catalog_refresh_due())return;
-  s_sync_pending=true;
-  send_command("CTRL_REQUEST",s_mode);
+  s_sync_pending=send_command("CTRL_REQUEST",s_mode);
 }
 static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){return s_visible_count?s_visible_count:1;}
 static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){return row_height();}
 static void select_row(MenuLayer *m,MenuIndex *idx,void *data){
   if(idx->row>=s_visible_count)return;
-  send_command("CTRL_ACT",s_visible[idx->row]);
-  snprintf(s_hint_text,sizeof(s_hint_text),"Sending command...");
+  bool queued=send_command("CTRL_ACT",s_visible[idx->row]);
+  snprintf(s_hint_text,sizeof(s_hint_text),"%s",queued?"Sending command...":"Phone busy, retry");
   if(s_hint)text_layer_set_text(s_hint,s_hint_text);
 }
 static void list_load(Window *w){
