@@ -248,6 +248,18 @@ static void select_short_click_handler(ClickRecognizerRef recognizer, void *cont
   }
 }
 
+static void voice_begin_after_navigation(void *context){
+  // Launch PebbleOS dictation after the Home menu has been popped.
+  // No intermediate idle/volume screen or extra Select press is required.
+  if(s_current_state==UI_STATE_IDLE)select_short_click_handler(NULL,NULL);
+}
+void controls_start_voice(void){
+  ha_audio_stop();
+  if(s_conversation_mode)conversation_disable();
+  set_ui_state(UI_STATE_IDLE);
+  app_timer_register(300,voice_begin_after_navigation,NULL);
+}
+
 static void select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
   conversation_toggle();
 }
@@ -272,6 +284,7 @@ static void results_back_click_handler(ClickRecognizerRef recognizer, void *cont
   conversation_disable();
   set_status(NULL);
   set_ui_state(UI_STATE_IDLE);
+  controls_home_open();
 }
 
 static void window_click_config_provider(void *context) {
@@ -318,7 +331,7 @@ static void set_ui_state(UIState state) {
       if (s_thinking_transcript_layer)
         layer_set_hidden(text_layer_get_layer(s_thinking_transcript_layer), true);
       layer_set_hidden(scroll_layer_get_layer(s_scroll_layer), true);
-      layer_set_hidden(s_arrow_layer, false);   
+      layer_set_hidden(s_arrow_layer, true);   
       layer_set_hidden(s_pinwheel_layer, true);  
       text_layer_set_text(s_prompt_layer,
         s_conversation_mode ?
@@ -514,6 +527,7 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
     if (s_conversation_mode && s_dictation_fallback) conversation_disable();
     set_ui_state(UI_STATE_IDLE);
     set_status(NULL);
+    if(cancelled)controls_home_open();
     if (!cancelled) {
       const char *reason = "Speech recognition failed";
       if (status == DictationSessionStatusFailureNoSpeechDetected) reason = "No speech detected";
@@ -626,6 +640,7 @@ static void main_window_load(Window *window) {
       text_layer_set_background_color(volume_hints[i], GColorClear);
       text_layer_set_text_color(volume_hints[i], GColorBlack);
       layer_add_child(s_idle_layer, text_layer_get_layer(volume_hints[i]));
+      layer_set_hidden(text_layer_get_layer(volume_hints[i]),true);
     }
   #endif
 #endif
