@@ -414,6 +414,7 @@ function askViaBridge(text,legacy,mute){
 
 var controlRows=[];
 var LAST_REV_KEY='HA_WATCH_CATALOG_REV_V2',LAST_STATES_KEY='HA_WATCH_STATES_V2';
+var WATCH_IDS_KEY='HA_WATCH_IDS_V2';
 function loadSentStates(){
   try {var data=JSON.parse(localStorage.getItem(LAST_STATES_KEY)||'{}');
     return data&&typeof data==='object'?data:{};}catch(e){return {};}
@@ -450,10 +451,10 @@ function controlSend(message,next,attempt){
   });
 }
 function controlRow(r,index){
-  return {COMMAND:'CTRL_ROW',CTRL_INDEX:index,CTRL_ID:String(r.id||'').slice(0,62),
-    CTRL_NAME:String(r.name||'Device').slice(0,46),
-    CTRL_STATUS:String(r.state||'unknown').slice(0,26),
-    CTRL_ROOM:String(r.room||'Unassigned').slice(0,30),
+  return {COMMAND:'CTRL_ROW',CTRL_INDEX:index,
+    CTRL_NAME:String(r.name||'Device').slice(0,35),
+    CTRL_STATUS:String(r.state||'unknown').slice(0,11),
+    CTRL_ROOM:String(r.room||'Unassigned').slice(0,21),
     CTRL_KIND:controlKind(r.domain),CTRL_FAV:r.favorite?1:0};
 }
 function sendCatalog(watchRevision,rows){
@@ -477,6 +478,7 @@ function sendCatalog(watchRevision,rows){
           if(!ok)return;
           localStorage.setItem(LAST_REV_KEY,String(revision));
           localStorage.setItem(LAST_STATES_KEY,JSON.stringify(nextStates));
+          localStorage.setItem(WATCH_IDS_KEY,JSON.stringify(controlRows.map(function(r){return r.id;})));
         });
       return;
     }
@@ -495,9 +497,17 @@ function controlLoad(watchRevision){
   });
 }
 function controlAct(index){
-  var r=controlRows[index];
+  // The watch can operate entirely from its persistent cache. Resolve the
+  // selected index against the LAST acknowledged watch catalog, even after
+  // PebbleKit JS restarts and before any new Bluetooth catalog request.
+  var ids=[];
+  try{ids=JSON.parse(localStorage.getItem(WATCH_IDS_KEY)||'[]');}catch(e){}
+  var id=ids[index]||(controlRows[index]&&controlRows[index].id);
+  if(!id)return;
+  var r=getCachedControls().filter(function(x){return x.id===id;})[0]||
+    controlRows.filter(function(x){return x.id===id;})[0];
   if(!r)return;
-  pluginAction('control_entity',{entity_id:r.id}).then(function(result){
+  pluginAction('control_entity',{entity_id:id}).then(function(result){
     pluginJson(result);
     if(isRunAction(r.domain)){
       // Scenes, scripts and one-shot automation triggers have no toggle state.
@@ -518,7 +528,7 @@ function controlAct(index){
       states[r.id]=r.state;
       localStorage.setItem(LAST_STATES_KEY,JSON.stringify(states));
       controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
-        CTRL_STATUS:String(r.state).slice(0,26)},function(ok){
+        CTRL_STATUS:String(r.state).slice(0,11)},function(ok){
         if(ok)controlSend({COMMAND:'CTRL_ACTION_DONE',CTRL_STATUS:'Updated'});
       });
     }
