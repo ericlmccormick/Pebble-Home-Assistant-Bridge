@@ -297,7 +297,7 @@ static void window_click_config_provider(void *context) {
     window_single_click_subscribe(BUTTON_ID_UP, open_devices);
 
     #ifdef PBL_SPEAKER
-      window_single_click_subscribe(BUTTON_ID_UP, up_volume_handler);    
+      window_long_click_subscribe(BUTTON_ID_UP, 500, up_volume_handler, NULL);    
       window_single_click_subscribe(BUTTON_ID_DOWN, down_volume_handler);  
     #endif
   }
