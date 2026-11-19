@@ -231,7 +231,9 @@ function configureWithDevices(rows){
   }).slice(0,48);
   var items=[
     {type:'heading',defaultValue:'Watch device visibility'},
-    {type:'text',defaultValue:'Favorite pins a device to Favorites. Hide on watch removes it from Favorites, Rooms, and Scenes & Scripts while keeping its setting saved. Home Assistant and voice control are unaffected.'}
+    {type:'text',defaultValue:'Favorite pins a device to Favorites. Hide on watch removes it from Favorites, Rooms, and Scenes & Scripts while keeping its setting saved. Home Assistant and voice control are unaffected.'},
+    {type:'toggle',messageKey:'REFRESH_DEVICES',label:'Refresh devices and rooms on next visit',
+      defaultValue:false}
   ];
   var previousRoom='';
   favoriteConfigRows.forEach(function(r,i){
@@ -319,6 +321,10 @@ Pebble.addEventListener('webviewclosed',function(e){
       // One small invalidation instead of retransmitting every room/device.
       Pebble.sendAppMessage({COMMAND:'CTRL_INVALIDATE'},null,function(){});
     }
+  }
+  if(valueBoolean(field('REFRESH_DEVICES'),false)){
+    localStorage.removeItem(CATALOG_FETCH_AT_KEY);
+    Pebble.sendAppMessage({COMMAND:'CTRL_INVALIDATE'},null,function(){});
   }
   if(field('ENABLE_TTS')!==undefined){
     enableTts=valueBoolean(field('ENABLE_TTS'),enableTts);
@@ -503,7 +509,13 @@ function controlAct(index){
   var ids=[];
   try{ids=JSON.parse(localStorage.getItem(WATCH_IDS_KEY)||'[]');}catch(e){}
   var id=ids[index]||(controlRows[index]&&controlRows[index].id);
-  if(!id)return;
+  if(!id){
+    // A phone reinstall can clear the index mapping while the watch cache
+    // remains populated. Invalidate the catalog instead of acting on a guess.
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:'Reload devices'});
+    controlSend({COMMAND:'CTRL_INVALIDATE'});
+    return;
+  }
   var r=getCachedControls().filter(function(x){return x.id===id;})[0]||
     controlRows.filter(function(x){return x.id===id;})[0];
   if(!r)return;
