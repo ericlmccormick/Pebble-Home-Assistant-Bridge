@@ -20,6 +20,8 @@ jobs:
         run: node tests/progressive-audio.test.cjs
       - name: Sentence prefetch, ordered chunks and Bluetooth continuity
         run: node tests/sentence-prefetch.test.cjs
+      - name: Day and night text, icon and selection contrast
+        run: node tests/theme-contrast.test.cjs
       - name: Static watch SDK interface validation
         run: |
           python3 - <<'PY'
