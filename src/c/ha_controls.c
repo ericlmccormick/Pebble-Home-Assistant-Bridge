@@ -34,7 +34,11 @@ static char s_rooms[CONTROL_MAX][ROOM_LEN];
 static uint8_t s_room_sizes[CONTROL_MAX];
 static uint8_t s_room_starts[CONTROL_MAX];
 static bool s_loading=false;
-static Window *s_home=NULL,*s_list=NULL;
+static Window *s_home=NULL,*s_list=NULL,*s_detail_window=NULL;
+static Layer *s_detail_layer=NULL;
+static int s_detail_index=-1,s_detail_level=-1;
+static bool s_detail_adjustable=false,s_detail_busy=false,s_detail_loading=false;
+static char s_detail_note[42]="";
 static MenuLayer *s_home_menu=NULL,*s_menu=NULL;
 static TextLayer *s_hint=NULL;
 static char s_hint_text[64]="Select: toggle or run";
@@ -72,6 +76,8 @@ void controls_apply_settings(bool large,bool dark){
   s_large_text=large;s_night_theme=dark;
   refresh_menu(s_home_menu,s_home);
   refresh_menu(s_menu,s_list);
+  if(s_detail_window)window_set_background_color(s_detail_window,ui_bg());
+  if(s_detail_layer)layer_mark_dirty(s_detail_layer);
   if(s_hint){
     text_layer_set_background_color(s_hint,ui_bg());
     text_layer_set_text_color(s_hint,ui_fg());
@@ -120,15 +126,21 @@ static GColor badge_ink(bool selected){
   return selected?ui_selected_bg():ui_bg();
 #endif
 }
-static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted){
-  graphics_context_set_fill_color(ctx,badge_fill(kind,highlighted));
+static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,const char *state){
+  // Filled/bright = ON; outlined/muted = OFF. Unknown is muted as well.
+  // Non-toggle items keep their original full-color category badge.
+  bool dimmed=state&&(strcmp(state,"off")==0||
+    strcmp(state,"unavailable")==0||strcmp(state,"unknown")==0);
+  GColor ink=dimmed?(highlighted?ui_selected_fg():ui_muted()):badge_ink(highlighted);
+  graphics_context_set_fill_color(ctx,
+    dimmed?(highlighted?ui_selected_bg():ui_bg()):badge_fill(kind,highlighted));
   graphics_fill_circle(ctx,c,14);
-  // Outer ring contrasts against the row; pictogram contrasts against badge.
-  graphics_context_set_stroke_color(ctx,highlighted?ui_selected_fg():ui_fg());
+  graphics_context_set_stroke_color(ctx,dimmed?(highlighted?ui_selected_fg():ui_muted()):
+    (highlighted?ui_selected_fg():ui_fg()));
   graphics_context_set_stroke_width(ctx,1);
   graphics_draw_circle(ctx,c,14);
-  graphics_context_set_stroke_color(ctx,badge_ink(highlighted));
-  graphics_context_set_fill_color(ctx,badge_ink(highlighted));
+  graphics_context_set_stroke_color(ctx,ink);
+  graphics_context_set_fill_color(ctx,ink);
   graphics_context_set_stroke_width(ctx,2);
   switch(kind){
     case 1: // lightbulb: globe, stem, screw base
@@ -211,7 +223,7 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   if(!s_visible_count){
     graphics_context_set_text_color(ctx,cell_fg(active));
     graphics_draw_text(ctx,s_loading?"Loading devices...":"No devices to show",
-      fonts_get_system_font(FONT_KEY_GOTHIC_18),GRect(8,9,b.size.w-16,42),
+      fonts_get_system_font(FONT_KEY_GOTHIC_18),GRect(8,5,b.size.w-16,b.size.h-8),
       GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
     return;
   }
@@ -219,23 +231,21 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   if(catalog_index<0)return;
   ControlRow *r=&s_rows[catalog_index];
   int x=PBL_IF_ROUND_ELSE(35,8);
-  paint_badge(ctx,GPoint(x+13,b.size.h/2),r->kind,active);
-  int left=x+33,wide=b.size.w-left-PBL_IF_ROUND_ELSE(34,8);
+  paint_badge(ctx,GPoint(x+13,b.size.h/2),r->kind,active,r->state);
+  // One line per device (two only in the large-accessibility-text mode).
+  // State is carried by the badge, not by a wasteful subtitle row.
+  int left=x+34;
+  int right=r->favorite?PBL_IF_ROUND_ELSE(34,21):PBL_IF_ROUND_ELSE(15,7);
+  int h=s_large_text?48:26;
   graphics_context_set_text_color(ctx,cell_fg(active));
   graphics_draw_text(ctx,r->name,title_font(),
-    GRect(left,title_top(),wide-9,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
-  char subtitle[70];
-  // In the room-grouped view the header already gives the room, so avoid
-  // repeating it on every device. Keep it in Favorites / Scenes & Scripts.
-  if(s_mode==0)snprintf(subtitle,sizeof(subtitle),"%s",r->state);
-  else snprintf(subtitle,sizeof(subtitle),"%s  |  %s",r->room,r->state);
-  graphics_context_set_text_color(ctx,cell_sub(active));
-  graphics_draw_text(ctx,subtitle,sub_font(),
-    GRect(left,sub_top(),wide,20),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(left,(b.size.h-h)/2,b.size.w-left-right,h),
+    s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,
+    GTextAlignmentLeft,NULL);
   if(r->favorite){
     graphics_context_set_text_color(ctx,cell_sub(active));
     graphics_draw_text(ctx,"*",fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-      GRect(b.size.w-PBL_IF_ROUND_ELSE(33,16),4,15,20),
+      GRect(b.size.w-PBL_IF_ROUND_ELSE(33,18),(b.size.h-25)/2,15,25),
       GTextOverflowModeFill,GTextAlignmentCenter,NULL);
   }
 }
@@ -330,10 +340,108 @@ static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){
   return section==0?(s_visible_count?s_visible_count:1):0;
 }
 
-static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){return row_height();}
+static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){
+  // Home screen retains two-line descriptions; device menu rows are compact.
+  return m==s_home_menu?row_height():(s_large_text?58:38);
+}
+
+static void detail_draw(Layer *layer,GContext *ctx){
+  if(s_detail_index<0||s_detail_index>=s_count)return;
+  ControlRow *r=&s_rows[s_detail_index];
+  GRect b=layer_get_bounds(layer);
+  graphics_context_set_text_color(ctx,ui_muted());
+  graphics_draw_text(ctx,r->room,fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+    GRect(10,3,b.size.w-20,21),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+  graphics_context_set_text_color(ctx,ui_fg());
+  graphics_draw_text(ctx,r->name,fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+    GRect(10,24,b.size.w-20,47),GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
+  const char *status=strcmp(r->state,"on")==0?"ON":
+    strcmp(r->state,"off")==0?"OFF":r->state;
+  int status_y=b.size.h>=200?79:68;
+  graphics_draw_text(ctx,status,fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+    GRect(10,status_y,b.size.w-20,36),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+  if(s_detail_loading){
+    graphics_draw_text(ctx,"Reading state...",fonts_get_system_font(FONT_KEY_GOTHIC_18),
+      GRect(8,status_y+37,b.size.w-16,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+  }else if(s_detail_adjustable){
+    char level[24];
+    if(s_detail_level<0)snprintf(level,sizeof(level),"Level: --");
+    else snprintf(level,sizeof(level),"%d%%",s_detail_level);
+    graphics_draw_text(ctx,level,fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      GRect(10,status_y+36,b.size.w-20,31),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+    if(b.size.h>=190&&s_detail_level>=0){
+      GRect track=GRect(22,b.size.h-60,b.size.w-44,10);
+      graphics_context_set_stroke_color(ctx,ui_fg());
+      graphics_draw_rect(ctx,track);
+      graphics_context_set_fill_color(ctx,ui_fg());
+      graphics_fill_rect(ctx,GRect(track.origin.x+2,track.origin.y+2,
+        (track.size.w-4)*s_detail_level/100,track.size.h-4),0,GCornerNone);
+    }
+  }
+  const char *hint=s_detail_busy?"Updating...":
+    s_detail_note[0]?s_detail_note:
+    s_detail_adjustable?"UP / DOWN: level  |  SELECT: power":"SELECT: power";
+  graphics_context_set_text_color(ctx,ui_muted());
+  graphics_draw_text(ctx,hint,fonts_get_system_font(FONT_KEY_GOTHIC_14),
+    GRect(3,b.size.h-30,b.size.w-6,29),GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
+}
+static void detail_adjust_click(int direction){
+  if(s_detail_busy||s_detail_loading||!s_detail_adjustable||s_detail_index<0)return;
+  DictionaryIterator *out=NULL;
+  if(app_message_outbox_begin(&out)!=APP_MSG_OK||!out)return;
+  dict_write_cstring(out,MESSAGE_KEY_COMMAND,"CTRL_ADJUST");
+  dict_write_int32(out,MESSAGE_KEY_CTRL_INDEX,s_detail_index);
+  dict_write_int32(out,MESSAGE_KEY_CTRL_DIRECTION,direction);
+  dict_write_end(out);
+  if(app_message_outbox_send()==APP_MSG_OK){
+    s_detail_busy=true;s_detail_note[0]=0;layer_mark_dirty(s_detail_layer);
+  }
+}
+static void detail_up_click(ClickRecognizerRef recognizer,void *context){detail_adjust_click(1);}
+static void detail_down_click(ClickRecognizerRef recognizer,void *context){detail_adjust_click(-1);}
+static void detail_select_click(ClickRecognizerRef recognizer,void *context){
+  if(s_detail_busy||s_detail_loading||s_detail_index<0)return;
+  if(send_command("CTRL_ACT",s_detail_index)){
+    s_detail_busy=true;s_detail_note[0]=0;layer_mark_dirty(s_detail_layer);
+  }
+}
+static void detail_click_config(void *context){
+  window_single_click_subscribe(BUTTON_ID_UP,detail_up_click);
+  window_single_click_subscribe(BUTTON_ID_DOWN,detail_down_click);
+  window_single_click_subscribe(BUTTON_ID_SELECT,detail_select_click);
+}
+static void detail_load(Window *w){
+  window_set_background_color(w,ui_bg());
+  s_detail_layer=layer_create(layer_get_bounds(window_get_root_layer(w)));
+  layer_set_update_proc(s_detail_layer,detail_draw);
+  layer_add_child(window_get_root_layer(w),s_detail_layer);
+}
+static void detail_unload(Window *w){
+  layer_destroy(s_detail_layer);s_detail_layer=NULL;
+  window_destroy(s_detail_window);s_detail_window=NULL;
+  s_detail_index=-1;s_detail_busy=false;s_detail_loading=false;
+}
+static void detail_push(int index){
+  if(s_detail_window||index<0||index>=s_count)return;
+  s_detail_index=index;s_detail_level=-1;s_detail_adjustable=false;
+  s_detail_busy=true;s_detail_loading=true;s_detail_note[0]=0;
+  s_detail_window=window_create();
+  window_set_window_handlers(s_detail_window,(WindowHandlers){
+    .load=detail_load,.unload=detail_unload});
+  window_set_click_config_provider(s_detail_window,detail_click_config);
+  window_stack_push(s_detail_window,true);
+  if(!send_command("CTRL_DETAILS",index)){
+    s_detail_busy=false;s_detail_loading=false;
+    snprintf(s_detail_note,sizeof(s_detail_note),"Phone busy; reopen");
+    if(s_detail_layer)layer_mark_dirty(s_detail_layer);
+  }
+}
 static void select_row(MenuLayer *m,MenuIndex *idx,void *data){
   int catalog_index=catalog_index_for(idx);
   if(catalog_index<0)return;
+  // One-shot scenes, scripts and automations still run directly.
+  uint8_t kind=s_rows[catalog_index].kind;
+  if(kind!=5&&kind!=6&&kind!=7){detail_push(catalog_index);return;}
   bool queued=send_command("CTRL_ACT",catalog_index);
   snprintf(s_hint_text,sizeof(s_hint_text),"%s",queued?"Sending command...":"Phone busy, retry");
   if(s_hint)text_layer_set_text(s_hint,s_hint_text);
@@ -419,7 +527,7 @@ static const char *home_subs[]={"Dictation and conversation","Your pinned contro
 static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
   bool active=menu_cell_layer_is_highlighted(cell);
-  paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,20),b.size.h/2),(uint8_t)(idx->row+8),active);
+  paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,20),b.size.h/2),(uint8_t)(idx->row+8),active,NULL);
   int x=PBL_IF_ROUND_ELSE(60,39);
   graphics_context_set_text_color(ctx,cell_fg(active));
   graphics_draw_text(ctx,home_names[idx->row],title_font(),
@@ -491,6 +599,29 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     // Refresh on next visit, not automatically across Bluetooth.
     return;
   }
+  if(strcmp(command,"CTRL_DETAIL_STATE")==0){
+    Tuple *i=dict_find(iter,MESSAGE_KEY_CTRL_INDEX);
+    Tuple *st=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
+    Tuple *level=dict_find(iter,MESSAGE_KEY_CTRL_LEVEL);
+    Tuple *adj=dict_find(iter,MESSAGE_KEY_CTRL_ADJUSTABLE);
+    if(!i||!st)return;
+    int index=i->value->int32;
+    if(index<0||index>=s_count)return;
+    if(strcmp(s_rows[index].state,st->value->cstring)!=0){
+      snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
+      catalog_store_status(index);
+      if(s_menu)menu_layer_reload_data(s_menu);
+    }
+    if(index==s_detail_index){
+      s_detail_level=level?level->value->int32:-1;
+      if(s_detail_level>100)s_detail_level=100;
+      if(s_detail_level<0)s_detail_level=-1;
+      s_detail_adjustable=adj&&adj->value->int32!=0;
+      s_detail_busy=false;s_detail_loading=false;s_detail_note[0]=0;
+      if(s_detail_layer)layer_mark_dirty(s_detail_layer);
+    }
+    return;
+  }
   if(strcmp(command,"CTRL_ROW")==0){
     Tuple *i=dict_find(iter,MESSAGE_KEY_CTRL_INDEX);
     Tuple *n=dict_find(iter,MESSAGE_KEY_CTRL_NAME);
@@ -560,6 +691,12 @@ void controls_receive(DictionaryIterator *iter,const char *command){
   if(strcmp(command,"CTRL_ERROR")==0){
     s_loading=false;s_sync_pending=false;
     Tuple *t=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
+    if(s_detail_window){
+      s_detail_busy=false;s_detail_loading=false;
+      snprintf(s_detail_note,sizeof(s_detail_note),"%s",
+        t?t->value->cstring:"Control failed");
+      if(s_detail_layer)layer_mark_dirty(s_detail_layer);
+    }
     snprintf(s_hint_text,sizeof(s_hint_text),"%s",t?t->value->cstring:"Control failed");
     if(s_hint)text_layer_set_text(s_hint,s_hint_text);
     if(s_menu)menu_layer_reload_data(s_menu);

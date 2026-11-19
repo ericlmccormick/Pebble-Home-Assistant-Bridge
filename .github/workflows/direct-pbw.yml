@@ -41,6 +41,7 @@ jobs:
           node tests/theme-contrast.test.cjs
           node tests/control-cache.test.cjs
           node tests/inline-rooms.test.cjs
+          node tests/device-details.test.cjs
       - name: Install firmware-compatible Pebble SDK
         run: |
           uv tool install pebble-tool

@@ -37,6 +37,7 @@ assert(mapping.includes('idx->row>=s_room_sizes[idx->section]'),
   'Out-of-bounds room rows cannot control devices');
 const act=between(c,'static void select_row(','static void list_load(');
 assert(act.includes('send_command("CTRL_ACT",catalog_index)'));
+assert(act.includes('detail_push(catalog_index)'),'Toggle devices open a details view');
 assert(!act.includes('send_command("CTRL_ACT",idx->row)'));
 const header=between(c,'static void draw_room_header(','static uint16_t num_rows(');
 assert(header.includes('ui_muted()'),'Room header colors follow day/night theme');

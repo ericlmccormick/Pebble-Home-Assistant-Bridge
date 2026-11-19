@@ -489,48 +489,110 @@ function controlLoad(watchRevision){
     controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
   });
 }
-function controlAct(index){
-  // The watch can operate entirely from its persistent cache. Resolve the
-  // selected index against the LAST acknowledged watch catalog, even after
-  // PebbleKit JS restarts and before any new Bluetooth catalog request.
+
+function controlAt(index){
+  // Resolve against the acknowledged index mapping, not a stale array.
   var ids=[];
   try{ids=JSON.parse(localStorage.getItem(WATCH_IDS_KEY)||'[]');}catch(e){}
   var id=ids[index]||(controlRows[index]&&controlRows[index].id);
   if(!id){
-    // A phone reinstall can clear the index mapping while the watch cache
-    // remains populated. Invalidate the catalog instead of acting on a guess.
     controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:'Reload devices'});
     controlSend({COMMAND:'CTRL_INVALIDATE'});
-    return;
+    return null;
   }
   var r=getCachedControls().filter(function(x){return x.id===id;})[0]||
     controlRows.filter(function(x){return x.id===id;})[0];
-  if(!r)return;
-  pluginAction('control_entity',{entity_id:id}).then(function(result){
+  return r?{id:id,row:r}:null;
+}
+function detailMeta(fresh,domain){
+  var a=fresh&&fresh.attributes||{},level=-1,adjustable=false;
+  if(domain==='light'){
+    var modes=Array.isArray(a.supported_color_modes)?a.supported_color_modes:[];
+    adjustable=modes.some(function(m){return m!=='onoff';})||
+      typeof a.brightness==='number';
+    if(typeof a.brightness==='number')
+      level=Math.max(0,Math.min(100,Math.round(a.brightness*100/255)));
+    else if(String(fresh.state)==='off'&&adjustable)level=0;
+  }else if(domain==='fan'){
+    adjustable=typeof a.percentage==='number'||((Number(a.supported_features)||0)&1)!==0;
+    if(typeof a.percentage==='number')
+      level=Math.max(0,Math.min(100,Math.round(a.percentage)));
+    else if(String(fresh.state)==='off'&&adjustable)level=0;
+  }
+  return {level:level,adjustable:adjustable};
+}
+function syncFreshState(index,r,fresh,complete){
+  if(!fresh||fresh.state===undefined)throw Error('Missing current state');
+  r.state=String(fresh.state);
+  var all=getCachedControls();
+  all.forEach(function(x){if(x.id===r.id)x.state=r.state;});
+  localStorage.setItem(CATALOG_CACHE_KEY,JSON.stringify(all));
+  var states=loadSentStates();
+  states[r.id]=r.state;
+  localStorage.setItem(LAST_STATES_KEY,JSON.stringify(states));
+  var meta=detailMeta(fresh,r.domain);
+  controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
+    CTRL_STATUS:r.state.slice(0,11)},function(ok){
+    if(!ok)return;
+    controlSend({COMMAND:'CTRL_DETAIL_STATE',CTRL_INDEX:index,
+      CTRL_STATUS:r.state.slice(0,11),CTRL_LEVEL:meta.level,
+      CTRL_ADJUSTABLE:meta.adjustable?1:0},function(ok2){
+      if(ok2&&complete)controlSend({COMMAND:'CTRL_ACTION_DONE',CTRL_STATUS:'Updated'});
+    });
+  });
+}
+function controlDetails(index){
+  var item=controlAt(index);
+  if(!item)return;
+  pluginAction('get_state',{entity_id:item.id}).then(function(result){
+    syncFreshState(index,item.row,pluginJson(result),false);
+  }).catch(function(err){
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
+  });
+}
+function controlAdjust(index,direction){
+  var item=controlAt(index);
+  if(!item||!(direction===1||direction===-1))return;
+  var domain=item.id.split('.')[0];
+  if(domain!=='light'&&domain!=='fan')return;
+  pluginAction('get_state',{entity_id:item.id}).then(function(result){
+    var fresh=pluginJson(result),meta=detailMeta(fresh,domain);
+    if(!meta.adjustable)throw Error('Level control unavailable');
+    var base=meta.level>=0?meta.level:(fresh.state==='off'?0:100);
+    var a=fresh.attributes||{};
+    var step=domain==='fan'?Number(a.percentage_step)||10:10;
+    if(!isFinite(step)||step<=0||step>100)step=10;
+    var next=Math.max(0,Math.min(100,Math.round(base+direction*step)));
+    if(next===base){syncFreshState(index,item.row,fresh,false);return null;}
+    var service=next===0?'turn_off':domain==='fan'?'set_percentage':'turn_on';
+    var data={entity_id:item.id};
+    if(next>0){
+      if(domain==='fan')data.percentage=next;
+      else data.brightness_pct=next;
+    }
+    return pluginAction('call_service',{domain:domain,service:service,data:data});
+  }).then(function(result){
+    if(!result)return;
     pluginJson(result);
-    if(isRunAction(r.domain)){
-      // Scenes, scripts and one-shot automation triggers have no toggle state.
+    return pluginAction('get_state',{entity_id:item.id});
+  }).then(function(result){
+    if(result)syncFreshState(index,item.row,pluginJson(result),true);
+  }).catch(function(err){
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
+  });
+}
+function controlAct(index){
+  var item=controlAt(index);
+  if(!item)return;
+  pluginAction('control_entity',{entity_id:item.id}).then(function(result){
+    pluginJson(result);
+    if(isRunAction(item.row.domain)){
       controlSend({COMMAND:'CTRL_ACTION_DONE',CTRL_STATUS:'Triggered'});
       return null;
     }
-    return pluginAction('get_state',{entity_id:r.id});
+    return pluginAction('get_state',{entity_id:item.id});
   }).then(function(result){
-    if(!result)return;
-    var fresh=pluginJson(result);
-    if(fresh&&fresh.state!==undefined){
-      r.state=String(fresh.state);
-      var all=getCachedControls();
-      all.forEach(function(x){if(x.id===r.id)x.state=r.state;});
-      // This changes only the local phone cache, not its discovery age.
-      localStorage.setItem(CATALOG_CACHE_KEY,JSON.stringify(all));
-      var states=loadSentStates();
-      states[r.id]=r.state;
-      localStorage.setItem(LAST_STATES_KEY,JSON.stringify(states));
-      controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
-        CTRL_STATUS:String(r.state).slice(0,11)},function(ok){
-        if(ok)controlSend({COMMAND:'CTRL_ACTION_DONE',CTRL_STATUS:'Updated'});
-      });
-    }
+    if(result)syncFreshState(index,item.row,pluginJson(result),true);
   }).catch(function(err){
     controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
   });
@@ -541,6 +603,8 @@ Pebble.addEventListener('appmessage',function(event){
   if(audio.handleMessage(d))return;
   if(d.COMMAND==='CTRL_REQUEST'){controlLoad(Number(d.CTRL_REV)||0);return;}
   if(d.COMMAND==='CTRL_ACT'){controlAct(Number(d.CTRL_INDEX));return;}
+  if(d.COMMAND==='CTRL_DETAILS'){controlDetails(Number(d.CTRL_INDEX));return;}
+  if(d.COMMAND==='CTRL_ADJUST'){controlAdjust(Number(d.CTRL_INDEX),Number(d.CTRL_DIRECTION));return;}
   if(d.COMMAND!=='DICTATION'&&d.COMMAND!=='CONV_DICTATION')return;
   var legacy=d.COMMAND==='CONV_DICTATION';
   if(!d.TEXT){replyError('No dictation captured',legacy);return;}
