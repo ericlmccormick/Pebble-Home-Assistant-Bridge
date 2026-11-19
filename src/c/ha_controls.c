@@ -85,8 +85,8 @@ static GColor kind_color(uint8_t kind){
 static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted){
   graphics_context_set_fill_color(ctx,highlighted?ui_bg():kind_color(kind));
   graphics_fill_circle(ctx,c,14);
-  graphics_context_set_stroke_color(ctx,ui_fg());
-  graphics_context_set_fill_color(ctx,ui_fg());
+  graphics_context_set_stroke_color(ctx,GColorBlack);
+  graphics_context_set_fill_color(ctx,GColorBlack);
   graphics_context_set_stroke_width(ctx,2);
   switch(kind){
     case 1: // lightbulb: globe, stem, screw base
