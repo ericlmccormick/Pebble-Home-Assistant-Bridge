@@ -201,7 +201,7 @@ function configureWithDevices(rows){
       '<style>'+
       '.component-checkbox>.label{font-weight:600;padding-bottom:4px;}'+
       '.component-checkbox .checkbox-group{display:flex;gap:4px;padding-bottom:2px;}'+
-      '.component-checkbox .checkbox-group label{flex:1;min-width:0;gap:5px;padding:7px 2px;}'+
+      '.component-checkbox .checkbox-group label{display:flex;flex:1;min-width:0;flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:8px;padding:7px 2px;}'+
       '.component-checkbox .checkbox-group .label{font-size:0.9em;white-space:nowrap;}'+
       '.component-checkbox .checkbox-group i{width:23px;height:23px;flex-shrink:0;}'+
       '</style>'}
