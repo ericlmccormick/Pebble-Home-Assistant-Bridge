@@ -1,12 +1,18 @@
 #include <pebble.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 // Control Center is a separate window stack from the established voice/audio UI.
 // Keep watch memory bounded and never expose high-risk device domains.
 #define CONTROL_MAX 48
 #define NAME_LEN 48
 #define ROOM_LEN 32
+#define CACHE_COUNT_KEY 3800
+#define CACHE_REV_KEY 3801
+#define CACHE_STAMP_KEY 3802
+#define CACHE_FIRST_ROW_KEY 3900
+#define CACHE_REFRESH_SECONDS 3600
 typedef struct {
   char id[64], name[NAME_LEN], state[28], room[ROOM_LEN];
   uint8_t kind;
@@ -23,6 +29,9 @@ static Window *s_home=NULL,*s_list=NULL,*s_room_window=NULL;
 static MenuLayer *s_home_menu=NULL,*s_menu=NULL,*s_room_menu=NULL;
 static TextLayer *s_hint=NULL;
 static char s_hint_text[64]="Select: toggle or run";
+static int32_t s_catalog_revision=0;
+static time_t s_last_sync_at=0;
+static bool s_catalog_loaded=false,s_sync_pending=false;
 
 static bool s_large_text=false;
 static bool s_night_theme=false;
@@ -37,8 +46,11 @@ static GFont title_font(void){return fonts_get_system_font(s_large_text?FONT_KEY
 static GFont sub_font(void){return fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_18:FONT_KEY_GOTHIC_14);}
 static GColor cell_fg(bool active){return active?ui_selected_fg():ui_fg();}
 static GColor cell_sub(bool active){return active?ui_selected_fg():ui_muted();}
-static int title_height(void){return s_large_text?56:24;}
-static int sub_top(void){return s_large_text?59:26;}
+static int title_height(void){return s_large_text?48:23;}
+static int sub_top(void){return s_large_text?56:23;}
+static int row_height(void){return s_large_text?80:46;}
+static int title_top(void){return s_large_text?7:3;}
+static int home_title_top(void){return s_large_text?(row_height()-title_height())/2:3;}
 static void refresh_menu(MenuLayer *m,Window *w){
   if(w)window_set_background_color(w,ui_bg());
   if(!m)return;
@@ -63,6 +75,8 @@ static void send_command(const char *command,int index){
   if(app_message_outbox_begin(&out)!=APP_MSG_OK||!out)return;
   dict_write_cstring(out,MESSAGE_KEY_COMMAND,command);
   if(index>=0)dict_write_int32(out,MESSAGE_KEY_CTRL_INDEX,index);
+  if(strcmp(command,"CTRL_REQUEST")==0)
+    dict_write_int32(out,MESSAGE_KEY_CTRL_REV,s_catalog_revision);
   dict_write_end(out);
   app_message_outbox_send();
 }
@@ -191,7 +205,7 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int left=x+33,wide=b.size.w-left-PBL_IF_ROUND_ELSE(34,8);
   graphics_context_set_text_color(ctx,cell_fg(active));
   graphics_draw_text(ctx,r->name,title_font(),
-    GRect(left,3,wide-9,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(left,title_top(),wide-9,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char subtitle[70];
   snprintf(subtitle,sizeof(subtitle),"%s  |  %s",r->room,r->state);
   graphics_context_set_text_color(ctx,cell_sub(active));
@@ -204,8 +218,58 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
       GTextOverflowModeFill,GTextAlignmentCenter,NULL);
   }
 }
+// A single row is below Pebble's 256-byte persistent storage entry limit.
+// Store the watch catalog once, then rebuild Favorites and Rooms locally.
+static void catalog_restore(void){
+  if(s_catalog_loaded)return;
+  s_catalog_loaded=true;
+  int count=persist_exists(CACHE_COUNT_KEY)?persist_read_int(CACHE_COUNT_KEY):0;
+  if(count<0||count>CONTROL_MAX)return;
+  for(int i=0;i<count;i++){
+    if(persist_get_size(CACHE_FIRST_ROW_KEY+i)!=(int)sizeof(ControlRow)){
+      s_count=0;s_catalog_revision=0;return;
+    }
+    if(persist_read_data(CACHE_FIRST_ROW_KEY+i,&s_rows[i],sizeof(ControlRow))!=(int)sizeof(ControlRow)){
+      s_count=0;s_catalog_revision=0;return;
+    }
+    s_rows[i].id[sizeof(s_rows[i].id)-1]=0;
+    s_rows[i].name[sizeof(s_rows[i].name)-1]=0;
+    s_rows[i].room[sizeof(s_rows[i].room)-1]=0;
+    s_rows[i].state[sizeof(s_rows[i].state)-1]=0;
+  }
+  s_count=count;
+  s_catalog_revision=persist_exists(CACHE_REV_KEY)?persist_read_int(CACHE_REV_KEY):0;
+  s_last_sync_at=persist_exists(CACHE_STAMP_KEY)?(time_t)persist_read_int(CACHE_STAMP_KEY):0;
+}
+static void catalog_store(void){
+  // Storage writes only after a successful catalog synchronization.
+  for(int i=0;i<s_count;i++)
+    persist_write_data(CACHE_FIRST_ROW_KEY+i,&s_rows[i],sizeof(ControlRow));
+  persist_write_int(CACHE_COUNT_KEY,s_count);
+  persist_write_int(CACHE_REV_KEY,s_catalog_revision);
+  persist_write_int(CACHE_STAMP_KEY,(int)s_last_sync_at);
+}
+static void visible_rebuild(void){
+  s_visible_count=0;
+  for(int i=0;i<s_count;i++){
+    bool include=s_mode==1?s_rows[i].favorite:
+      s_mode==2?(s_rows[i].kind==5||s_rows[i].kind==6||s_rows[i].kind==7):true;
+    if(include)s_visible[s_visible_count++]=(uint8_t)i;
+  }
+  if(s_menu)menu_layer_reload_data(s_menu);
+}
+static bool catalog_refresh_due(void){
+  time_t now=time(NULL);
+  return s_catalog_revision==0||s_count==0||s_last_sync_at==0||now<s_last_sync_at||
+    (now-s_last_sync_at)>=CACHE_REFRESH_SECONDS;
+}
+static void catalog_request_if_due(void){
+  if(s_sync_pending||!catalog_refresh_due())return;
+  s_sync_pending=true;
+  send_command("CTRL_REQUEST",s_mode);
+}
 static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){return s_visible_count?s_visible_count:1;}
-static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){return s_large_text?86:52;}
+static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){return row_height();}
 static void select_row(MenuLayer *m,MenuIndex *idx,void *data){
   if(idx->row>=s_visible_count)return;
   send_command("CTRL_ACT",s_visible[idx->row]);
@@ -271,7 +335,7 @@ static void room_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int x=PBL_IF_ROUND_ELSE(61,45);
   graphics_context_set_text_color(ctx,cell_fg(active));
   graphics_draw_text(ctx,s_rooms[idx->row],title_font(),
-    GRect(x,5,b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(x,title_top(),b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char summary[32];
   snprintf(summary,sizeof(summary),"%d device%s",s_room_sizes[idx->row],
     s_room_sizes[idx->row]==1?"":"s");
@@ -317,16 +381,21 @@ static void room_unload(Window *w){
 }
 void controls_open_mode(int mode){
   if(s_list||s_room_window)return;
-  s_mode=mode;s_count=0;s_visible_count=0;s_room_count=0;s_loading=true;
+  catalog_restore();
+  s_mode=mode;
+  s_loading=s_count==0;
   if(mode==0){
+    rooms_rebuild();
     s_room_window=window_create();
     window_set_window_handlers(s_room_window,(WindowHandlers){.load=room_load,.unload=room_unload});
     window_stack_push(s_room_window,true);
   }else{
+    visible_rebuild();
     snprintf(s_hint_text,sizeof(s_hint_text),"%s",mode==1?"Favorite devices":"Scenes and scripts");
     list_push();
   }
-  send_command("CTRL_REQUEST",mode);
+  // Browsing locally cached rooms or favorites requires ZERO phone messages.
+  catalog_request_if_due();
 }
 // Legacy entry point used by earlier code.
 void controls_open(void){controls_open_mode(0);}
@@ -343,7 +412,7 @@ static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int x=PBL_IF_ROUND_ELSE(60,39);
   graphics_context_set_text_color(ctx,cell_fg(active));
   graphics_draw_text(ctx,home_names[idx->row],title_font(),
-    GRect(x,4,b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(x,home_title_top(),b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   graphics_context_set_text_color(ctx,cell_sub(active));
   if(!s_large_text)graphics_draw_text(ctx,home_subs[idx->row],sub_font(),
     GRect(x,sub_top(),b.size.w-x-7,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
@@ -397,47 +466,83 @@ static void home_unload(Window *w){
   window_destroy(s_home);s_home=NULL;
 }
 void controls_home_open(void){
+  catalog_restore();
   if(s_home)return;
   s_home=window_create();
   window_set_window_handlers(s_home,(WindowHandlers){.load=home_load,.unload=home_unload});
   window_stack_push(s_home,true);
 }
 void controls_receive(DictionaryIterator *iter,const char *command){
+  if(strcmp(command,"CTRL_INVALIDATE")==0){
+    s_catalog_revision=0;s_last_sync_at=0;
+    persist_write_int(CACHE_REV_KEY,0);
+    persist_write_int(CACHE_STAMP_KEY,0);
+    // Refresh on next visit, not automatically across Bluetooth.
+    return;
+  }
   if(strcmp(command,"CTRL_ROW")==0){
     Tuple *i=dict_find(iter,MESSAGE_KEY_CTRL_INDEX);
     Tuple *n=dict_find(iter,MESSAGE_KEY_CTRL_NAME);
-    Tuple *s=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
+    Tuple *st=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
     Tuple *id=dict_find(iter,MESSAGE_KEY_CTRL_ID);
     Tuple *room=dict_find(iter,MESSAGE_KEY_CTRL_ROOM);
     Tuple *kind=dict_find(iter,MESSAGE_KEY_CTRL_KIND);
     Tuple *fav=dict_find(iter,MESSAGE_KEY_CTRL_FAV);
-    if(!i||!n||!s||!id)return;
+    if(!i||!n||!st||!id)return;
     int index=i->value->int32;
     if(index<0||index>=CONTROL_MAX)return;
     snprintf(s_rows[index].name,sizeof(s_rows[index].name),"%s",n->value->cstring);
-    snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",s->value->cstring);
+    snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
     snprintf(s_rows[index].id,sizeof(s_rows[index].id),"%s",id->value->cstring);
     snprintf(s_rows[index].room,sizeof(s_rows[index].room),"%s",room?room->value->cstring:"Unassigned");
     s_rows[index].kind=kind?(uint8_t)kind->value->int32:0;
     s_rows[index].favorite=fav?fav->value->int32!=0:false;
     if(index>=s_count)s_count=index+1;
-    s_loading=false;
-    if(s_mode!=0){
-      s_visible_count=s_count;
-      for(int n=0;n<s_visible_count;n++)s_visible[n]=(uint8_t)n;
+    return;
+  }
+  if(strcmp(command,"CTRL_STATE")==0){
+    Tuple *i=dict_find(iter,MESSAGE_KEY_CTRL_INDEX);
+    Tuple *st=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
+    if(!i||!st)return;
+    int index=i->value->int32;
+    if(index<0||index>=s_count)return;
+    if(strcmp(s_rows[index].state,st->value->cstring)!=0){
+      snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
+      persist_write_data(CACHE_FIRST_ROW_KEY+index,&s_rows[index],sizeof(ControlRow));
       if(s_menu)menu_layer_reload_data(s_menu);
     }
-  } else if(strcmp(command,"CTRL_DONE")==0){
-    s_loading=false;
+    return;
+  }
+  if(strcmp(command,"CTRL_DONE")==0){
+    Tuple *count=dict_find(iter,MESSAGE_KEY_CTRL_TOTAL);
+    Tuple *rev=dict_find(iter,MESSAGE_KEY_CTRL_REV);
+    if(count&&rev){
+      int n=count->value->int32;
+      if(n<0||n>CONTROL_MAX)return;
+      s_count=n;
+      s_catalog_revision=rev->value->int32;
+      s_last_sync_at=time(NULL);
+      catalog_store();
+    }
+    s_loading=false;s_sync_pending=false;
     if(s_mode==0)rooms_rebuild();
-    if(s_menu)menu_layer_reload_data(s_menu);
-    if(s_hint)text_layer_set_text(s_hint,"Select: toggle or run");
-  } else if(strcmp(command,"CTRL_ERROR")==0){
-    s_loading=false;
+    else visible_rebuild();
+    if(s_hint)text_layer_set_text(s_hint,s_hint_text);
+    return;
+  }
+  if(strcmp(command,"CTRL_ACTION_DONE")==0){
+    Tuple *st=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
+    snprintf(s_hint_text,sizeof(s_hint_text),"%s",st?st->value->cstring:"Done");
+    if(s_hint)text_layer_set_text(s_hint,s_hint_text);
+    return;
+  }
+  if(strcmp(command,"CTRL_ERROR")==0){
+    s_loading=false;s_sync_pending=false;
     Tuple *t=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
     snprintf(s_hint_text,sizeof(s_hint_text),"%s",t?t->value->cstring:"Control failed");
     if(s_hint)text_layer_set_text(s_hint,s_hint_text);
     if(s_menu)menu_layer_reload_data(s_menu);
     if(s_room_menu)menu_layer_reload_data(s_room_menu);
+    return;
   }
 }
