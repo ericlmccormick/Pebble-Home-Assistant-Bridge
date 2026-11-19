@@ -158,6 +158,6 @@
       }
     ]
   },
-  "version": "1.5.2",
-  "description": "Home Assistant Control Center with streamlined phone settings and grouped per-device visibility checkboxes"
+  "version": "1.5.3",
+  "description": "Home Assistant Control Center with compact Google Home-style star and hide icon settings"
 }
