@@ -175,21 +175,63 @@ function diagnosticsText(){
       .replace(/>/g,'&gt;').replace(/"/g,'&quot;')+'</div>';
 }
 var favoriteConfigRows=[];
-function favoriteIds(){
-  try { var ids=JSON.parse(localStorage.getItem('HA_FAVORITES_V1')||'[]');
+var CATALOG_CACHE_KEY='HA_CONTROLS_CACHE_V1';
+var CATALOG_FETCH_AT_KEY='HA_CONTROLS_FETCHED_AT_V2';
+var CATALOG_TTL_MS=60*60*1000;
+var catalogPromise=null;
+function storedIds(key){
+  try {
+    var ids=JSON.parse(localStorage.getItem(key)||'[]');
     return Array.isArray(ids)?ids.filter(function(v){return typeof v==='string';}):[];
-  } catch(e){return [];}
+  }catch(e){return [];}
+}
+function favoriteIds(){return storedIds('HA_FAVORITES_V1');}
+function hiddenIds(){return storedIds('HA_HIDDEN_V1');}
+function getCachedControls(){
+  try {
+    var rows=JSON.parse(localStorage.getItem(CATALOG_CACHE_KEY)||'[]');
+    return Array.isArray(rows)?rows:[];
+  }catch(e){return [];}
+}
+function saveCachedControls(rows){
+  localStorage.setItem(CATALOG_CACHE_KEY,JSON.stringify(rows));
+  localStorage.setItem(CATALOG_FETCH_AT_KEY,String(Date.now()));
+}
+function fetchControlsIfStale(force){
+  var cached=getCachedControls();
+  var age=Date.now()-Number(localStorage.getItem(CATALOG_FETCH_AT_KEY)||0);
+  if(!force&&cached.length&&age>=0&&age<CATALOG_TTL_MS)return Promise.resolve(cached);
+  if(catalogPromise)return catalogPromise;
+  catalogPromise=pluginAction('list_controls',{}).then(function(result){
+    var rows=pluginJson(result);
+    if(!Array.isArray(rows))throw Error('Bridge returned no controllable entities');
+    saveCachedControls(rows);
+    return rows;
+  }).then(function(rows){catalogPromise=null;return rows;},function(err){
+    catalogPromise=null;
+    if(cached.length){console.log('Using cached controls: '+String(err&&err.message||err));return cached;}
+    throw err;
+  });
+  return catalogPromise;
 }
 function controlKind(domain){
   return {light:1,switch:2,input_boolean:2,fan:3,cover:4,scene:5,script:6,automation:7}[domain]||0;
 }
+function isRunAction(domain){return /^(scene|script|automation)$/.test(String(domain||''));}
+function displayState(row){
+  // A scene/script activation is an action, not an entity being switched on.
+  return isRunAction(row.domain)?'Run':String(row.state||'unknown');
+}
 function configureWithDevices(rows){
   var cfg=clayConfig.slice();
-  var favoriteSet=favoriteIds();
-  favoriteConfigRows=rows.slice(0,48);
+  var favorites=favoriteIds(),hidden=hiddenIds();
+  favoriteConfigRows=rows.slice().sort(function(a,b){
+    return String(a.room||'').localeCompare(String(b.room||''))||
+      String(a.name||'').localeCompare(String(b.name||''));
+  }).slice(0,48);
   var items=[
-    {type:'heading',defaultValue:'Favorite devices'},
-    {type:'text',defaultValue:'Choose devices for the Favorites menu on the watch. Changes apply next time you open the list.'}
+    {type:'heading',defaultValue:'Watch device visibility'},
+    {type:'text',defaultValue:'Favorite pins a device to Favorites. Hide on watch removes it from Favorites, Rooms, and Scenes & Scripts while keeping its setting saved. Home Assistant and voice control are unaffected.'}
   ];
   var previousRoom='';
   favoriteConfigRows.forEach(function(r,i){
@@ -198,11 +240,14 @@ function configureWithDevices(rows){
       items.push({type:'heading',defaultValue:String(r.room||'Unassigned').slice(0,36)});
     }
     items.push({type:'toggle',messageKey:'FAV_'+i,
-      label:String(r.name||r.id).slice(0,65),defaultValue:favoriteSet.indexOf(r.id)>=0});
+      label:'Favorite: '+String(r.name||r.id).slice(0,55),
+      defaultValue:favorites.indexOf(r.id)>=0});
+    items.push({type:'toggle',messageKey:'HIDE_'+i,
+      label:'Hide on watch: '+String(r.name||r.id).slice(0,51),
+      defaultValue:hidden.indexOf(r.id)>=0});
   });
-  if(!favoriteConfigRows.length){
-    items.push({type:'text',defaultValue:'No devices loaded. Configure Home Assistant Bridge and reopen Settings.'});
-  }
+  if(!favoriteConfigRows.length)
+    items.push({type:'text',defaultValue:'No cached devices yet. Configure Bridge, open Devices by Room, then reopen Settings.'});
   cfg.splice(1,0,{type:'section',items:items});
   cfg.forEach(function(section){
     if(!section.items)return;
@@ -214,32 +259,21 @@ function configureWithDevices(rows){
   Pebble.openURL(clay.generateUrl());
 }
 Pebble.addEventListener('showConfiguration',function(){
-  // A hung Bridge action must never block the app's configuration page.
-  // Show last-known devices, or at least basic settings, after 2.5 seconds.
-  var opened=false;
-  var fallback=[];
-  try {
-    fallback=JSON.parse(localStorage.getItem('HA_CONTROLS_CACHE_V1')||'[]');
-    if(!Array.isArray(fallback))fallback=[];
-  }catch(e){fallback=[];}
-  function openOnce(rows){
-    if(opened)return;
-    opened=true;
-    configureWithDevices(rows);
+  // Opening settings must not require a network call, especially on Android.
+  var cached=getCachedControls();
+  if(cached.length){
+    configureWithDevices(cached);
+    // Refresh metadata for a future settings visit if the cache expired.
+    fetchControlsIfStale(false).catch(function(e){console.log('Device refresh: '+String(e&&e.message||e));});
+    return;
   }
-  setTimeout(function(){openOnce(fallback);},2500);
-  pluginAction('list_controls',{}).then(function(result){
-    var rows=pluginJson(result);
-    if(!Array.isArray(rows))throw Error('No devices');
-    rows.sort(function(a,b){
-      var room=String(a.room||'').localeCompare(String(b.room||''));
-      return room||String(a.name||'').localeCompare(String(b.name||''));
-    });
-    localStorage.setItem('HA_CONTROLS_CACHE_V1',JSON.stringify(rows));
-    openOnce(rows);
-  }).catch(function(err){
-    console.log('Favorites discovery: '+String(err&&err.message||err));
-    openOnce(fallback);
+  // Cold first install: bounded discovery, then always open basic settings.
+  var opened=false;
+  function openOnce(rows){if(opened)return;opened=true;configureWithDevices(rows);}
+  setTimeout(function(){openOnce([]);},2500);
+  fetchControlsIfStale(true).then(openOnce).catch(function(err){
+    console.log('Initial device discovery: '+String(err&&err.message||err));
+    openOnce([]);
   });
 });
 function sendWatchSettings(preview){
@@ -261,14 +295,30 @@ Pebble.addEventListener('webviewclosed',function(e){
   try{fields=JSON.parse(decodeURIComponent(e.response));}catch(err){return;}
   function field(k){return fields[k]?fields[k].value:undefined;}
   if(favoriteConfigRows.length){
-    var chosen=favoriteIds();
+    var chosen=favoriteIds(),hidden=hiddenIds(),visibilityChanged=false;
     favoriteConfigRows.forEach(function(r,i){
-      var value=field('FAV_'+i);
-      if(value===undefined)return;
-      chosen=chosen.filter(function(id){return id!==r.id;});
-      if(valueBoolean(value,false))chosen.push(r.id);
+      var favoriteValue=field('FAV_'+i),hiddenValue=field('HIDE_'+i);
+      if(favoriteValue!==undefined){
+        var oldFavorite=chosen.indexOf(r.id)>=0;
+        var newFavorite=valueBoolean(favoriteValue,false);
+        if(newFavorite!==oldFavorite)visibilityChanged=true;
+        chosen=chosen.filter(function(id){return id!==r.id;});
+        if(newFavorite)chosen.push(r.id);
+      }
+      if(hiddenValue!==undefined){
+        var oldHidden=hidden.indexOf(r.id)>=0;
+        var newHidden=valueBoolean(hiddenValue,false);
+        if(newHidden!==oldHidden)visibilityChanged=true;
+        hidden=hidden.filter(function(id){return id!==r.id;});
+        if(newHidden)hidden.push(r.id);
+      }
     });
     localStorage.setItem('HA_FAVORITES_V1',JSON.stringify(chosen));
+    localStorage.setItem('HA_HIDDEN_V1',JSON.stringify(hidden));
+    if(visibilityChanged){
+      // One small invalidation instead of retransmitting every room/device.
+      Pebble.sendAppMessage({COMMAND:'CTRL_INVALIDATE'},null,function(){});
+    }
   }
   if(field('ENABLE_TTS')!==undefined){
     enableTts=valueBoolean(field('ENABLE_TTS'),enableTts);
@@ -363,48 +413,83 @@ function askViaBridge(text,legacy,mute){
 }
 
 var controlRows=[];
-function controlSend(message,next){
-  Pebble.sendAppMessage(message,function(){if(next)next();},function(err){
-    console.log('Control row transport failed '+JSON.stringify(err));
-    if(next)setTimeout(next,180);
+var LAST_REV_KEY='HA_WATCH_CATALOG_REV_V2',LAST_STATES_KEY='HA_WATCH_STATES_V2';
+function loadSentStates(){
+  try {var data=JSON.parse(localStorage.getItem(LAST_STATES_KEY)||'{}');
+    return data&&typeof data==='object'?data:{};}catch(e){return {};}
+}
+function normalizeCatalog(rows){
+  var favorites=favoriteIds(),hidden=hiddenIds();
+  return rows.filter(function(r){return r&&typeof r.id==='string'&&hidden.indexOf(r.id)<0;})
+    .sort(function(a,b){
+      return String(a.room||'').localeCompare(String(b.room||''))||
+        String(a.name||'').localeCompare(String(b.name||''))||
+        String(a.id).localeCompare(String(b.id));
+    }).slice(0,48).map(function(r){
+      return {id:r.id,name:r.name,room:r.room,domain:r.domain,
+        state:displayState(r),favorite:favorites.indexOf(r.id)>=0};
+    });
+}
+function catalogRevision(rows){
+  // Keep dynamic states out of this hash: on/off changes send tiny deltas.
+  var text='HA-WATCH-CATALOG-V2|'+rows.map(function(r){
+    return [r.id,r.name,r.room,r.domain,r.favorite?'1':'0'].join('|');
+  }).join('\n'),hash=5381;
+  for(var i=0;i<text.length;i++)hash=((hash*33)^text.charCodeAt(i))|0;
+  return hash||1;
+}
+function controlSend(message,next,attempt){
+  attempt=attempt||0;
+  Pebble.sendAppMessage(message,function(){if(next)next(true);},function(err){
+    if(attempt<2){
+      setTimeout(function(){controlSend(message,next,attempt+1);},220*(attempt+1));
+    }else{
+      console.log('Control transport failed after 3 tries: '+JSON.stringify(err));
+      if(next)next(false);
+    }
   });
 }
-function visibleControls(rows,mode){
-  var fav=favoriteIds();
-  return rows.filter(function(r){
-    if(mode===1)return fav.indexOf(r.id)>=0;
-    if(mode===2)return /^(scene|script|automation)$/.test(r.domain);
-    return true;
-  }).sort(function(a,b){
-    if(mode===0){
-      var af=fav.indexOf(a.id)>=0,bf=fav.indexOf(b.id)>=0;
-      if(af!==bf)return af?-1:1;
-    }
-    return String(a.room||'').localeCompare(String(b.room||''))||
-      String(a.name||'').localeCompare(String(b.name||''));
-  }).slice(0,48);
-}
 function controlRow(r,index){
-  var fav=favoriteIds();
   return {COMMAND:'CTRL_ROW',CTRL_INDEX:index,CTRL_ID:String(r.id||'').slice(0,62),
     CTRL_NAME:String(r.name||'Device').slice(0,46),
     CTRL_STATUS:String(r.state||'unknown').slice(0,26),
     CTRL_ROOM:String(r.room||'Unassigned').slice(0,30),
-    CTRL_KIND:controlKind(r.domain),CTRL_FAV:fav.indexOf(r.id)>=0?1:0};
+    CTRL_KIND:controlKind(r.domain),CTRL_FAV:r.favorite?1:0};
 }
-function controlLoad(mode){
-  pluginAction('list_controls',{}).then(function(result){
-    var rows=pluginJson(result);
-    if(!Array.isArray(rows))throw Error('Bridge returned no controllable entities');
-    localStorage.setItem('HA_CONTROLS_CACHE_V1',JSON.stringify(rows));
-    controlRows=visibleControls(rows,mode);
-    var i=0;
-    function sendNext(){
-      if(i>=controlRows.length){controlSend({COMMAND:'CTRL_DONE'});return;}
-      var index=i++;
-      controlSend(controlRow(controlRows[index],index),sendNext);
+function sendCatalog(watchRevision,rows){
+  controlRows=normalizeCatalog(rows);
+  var revision=catalogRevision(controlRows);
+  var lastSentRev=Number(localStorage.getItem(LAST_REV_KEY)||0);
+  var sentStates=loadSentStates();
+  var full=watchRevision!==revision||lastSentRev!==revision;
+  var packets=[];
+  controlRows.forEach(function(r,i){
+    if(full)packets.push(controlRow(r,i));
+    else if(sentStates[r.id]!==r.state)
+      packets.push({COMMAND:'CTRL_STATE',CTRL_INDEX:i,CTRL_STATUS:String(r.state).slice(0,26)});
+  });
+  var nextStates={};
+  controlRows.forEach(function(r){nextStates[r.id]=r.state;});
+  function sendAt(i){
+    if(i===packets.length){
+      controlSend({COMMAND:'CTRL_DONE',CTRL_TOTAL:controlRows.length,CTRL_REV:revision},
+        function(ok){
+          if(!ok)return;
+          localStorage.setItem(LAST_REV_KEY,String(revision));
+          localStorage.setItem(LAST_STATES_KEY,JSON.stringify(nextStates));
+        });
+      return;
     }
-    sendNext();
+    controlSend(packets[i],function(ok){
+      if(ok)sendAt(i+1);
+      else controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:'Sync interrupted'});
+    });
+  }
+  sendAt(0);
+}
+function controlLoad(watchRevision){
+  fetchControlsIfStale(false).then(function(rows){
+    sendCatalog(Number(watchRevision)||0,rows);
   }).catch(function(err){
     controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
   });
@@ -414,14 +499,29 @@ function controlAct(index){
   if(!r)return;
   pluginAction('control_entity',{entity_id:r.id}).then(function(result){
     pluginJson(result);
+    if(isRunAction(r.domain)){
+      // Scenes, scripts and one-shot automation triggers have no toggle state.
+      controlSend({COMMAND:'CTRL_ACTION_DONE',CTRL_STATUS:'Triggered'});
+      return null;
+    }
     return pluginAction('get_state',{entity_id:r.id});
   }).then(function(result){
+    if(!result)return;
     var fresh=pluginJson(result);
     if(fresh&&fresh.state!==undefined){
       r.state=String(fresh.state);
-      controlSend(controlRow(r,index));
+      var all=getCachedControls();
+      all.forEach(function(x){if(x.id===r.id)x.state=r.state;});
+      // This changes only the local phone cache, not its discovery age.
+      localStorage.setItem(CATALOG_CACHE_KEY,JSON.stringify(all));
+      var states=loadSentStates();
+      states[r.id]=r.state;
+      localStorage.setItem(LAST_STATES_KEY,JSON.stringify(states));
+      controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
+        CTRL_STATUS:String(r.state).slice(0,26)},function(ok){
+        if(ok)controlSend({COMMAND:'CTRL_ACTION_DONE',CTRL_STATUS:'Updated'});
+      });
     }
-    controlSend({COMMAND:'CTRL_DONE'});
   }).catch(function(err){
     controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
   });
@@ -430,7 +530,7 @@ function controlAct(index){
 Pebble.addEventListener('appmessage',function(event){
   var d=event.payload||{};
   if(audio.handleMessage(d))return;
-  if(d.COMMAND==='CTRL_REQUEST'){controlLoad(Number(d.CTRL_INDEX)||0);return;}
+  if(d.COMMAND==='CTRL_REQUEST'){controlLoad(Number(d.CTRL_REV)||0);return;}
   if(d.COMMAND==='CTRL_ACT'){controlAct(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND!=='DICTATION'&&d.COMMAND!=='CONV_DICTATION')return;
   var legacy=d.COMMAND==='CONV_DICTATION';
