@@ -30,6 +30,8 @@ jobs:
         run: node tests/watch-settings.test.cjs
       - name: Clay device filter and room header behavior
         run: node tests/phone-filter.test.cjs
+      - name: Concurrent live status and BLE queue regression
+        run: node tests/status-concurrency.test.cjs
       - name: Static watch SDK interface validation
         run: |
           python3 - <<'PY'
