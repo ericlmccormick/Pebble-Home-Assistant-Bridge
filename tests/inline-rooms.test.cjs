@@ -31,7 +31,7 @@ for(const claim of ['s_room_starts[s_room_count]=(uint8_t)vi',
 }
 const mapping=between(c,'static int catalog_index_for(MenuIndex *idx){','static void draw_cell(');
 assert(mapping.includes('s_room_starts[sec]+idx->row'));
-assert(mapping.includes('return s_visible[visible_index]'),
+assert(mapping.includes('return s_visible[vi]'),
   'Device actions retain the phone watch-index, not room-local menu row');
 assert(mapping.includes('idx->row>=s_room_sizes[sec]'),
   'Out-of-bounds room rows cannot control devices');
@@ -56,7 +56,7 @@ assert(c.includes('catalog_restore();')&&c.includes('catalog_request_if_due();')
   'Cached room navigation continues without automatic Bluetooth on every visit');
 assert(pkjs.includes("String(a.room||'').localeCompare(String(b.room||''))"),
   'Phone catalog is pre-sorted so room groups are contiguous');
-assert(pkjs.includes('hidden.indexOf(r.id)<0'),
+assert(pkjs.includes('hidden.indexOf(r.id)>=0'),
   'Hidden devices never create watch rows or empty room sections');
 
 // Simulate section boundaries over an already-sorted and visibility-filtered
