@@ -64,6 +64,9 @@ static bool s_large_text = false;
 #define PERSIST_KEY_THEME_DARK 101
 #define PERSIST_KEY_THEME_MODE 102
 #define PERSIST_KEY_LARGE_TEXT 103
+#define PERSIST_KEY_SUNRISE_MIN 104
+#define PERSIST_KEY_SUNSET_MIN 105
+#define PERSIST_KEY_SOLAR_SYNC_AT 106
 static bool s_theme_dark = false;
 static int s_theme_mode=2;
 static int s_haptic_level = 2; // 0 off, 1 low, 2 medium, 3 high
@@ -444,6 +447,9 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       Tuple *large_tuple = dict_find(iterator, MESSAGE_KEY_LARGE_TEXT);
       Tuple *theme_tuple = dict_find(iterator, MESSAGE_KEY_THEME_DARK);
       Tuple *theme_mode_tuple = dict_find(iterator, MESSAGE_KEY_THEME_MODE_CODE);
+      Tuple *sunrise_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SUNRISE_MIN);
+      Tuple *sunset_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SUNSET_MIN);
+      Tuple *solar_sync_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SOLAR_SYNC_AT);
       if(theme_mode_tuple){
         s_theme_mode=theme_mode_tuple->value->int32;
         if(s_theme_mode<0||s_theme_mode>2)s_theme_mode=2;
@@ -453,6 +459,16 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       if(large_tuple){
         s_large_text=large_tuple->value->int32!=0;
         persist_write_int(PERSIST_KEY_LARGE_TEXT,s_large_text?1:0);
+      }
+      if(sunrise_tuple&&sunset_tuple&&solar_sync_tuple){
+        int sunrise=sunrise_tuple->value->int32;
+        int sunset=sunset_tuple->value->int32;
+        int32_t synced=solar_sync_tuple->value->int32;
+        if(sunrise>=0&&sunrise<1440&&sunset>sunrise&&sunset<1440&&synced>0){
+          persist_write_int(PERSIST_KEY_SUNRISE_MIN,sunrise);
+          persist_write_int(PERSIST_KEY_SUNSET_MIN,sunset);
+          persist_write_int(PERSIST_KEY_SOLAR_SYNC_AT,synced);
+        }
       }
       if(theme_tuple){
         s_theme_dark=theme_tuple->value->int32!=0;
@@ -792,6 +808,22 @@ static void init() {
   }
   if(persist_exists(PERSIST_KEY_LARGE_TEXT))
     s_large_text=persist_read_int(PERSIST_KEY_LARGE_TEXT)!=0;
+  // Auto mode should follow the CURRENT clock, not merely the last theme
+  // received from the phone. Cached solar times can be 1-3 days old.
+  if(s_theme_mode==2&&persist_exists(PERSIST_KEY_SUNRISE_MIN)&&
+     persist_exists(PERSIST_KEY_SUNSET_MIN)&&persist_exists(PERSIST_KEY_SOLAR_SYNC_AT)){
+    time_t now=time(NULL);
+    int32_t sync=persist_read_int(PERSIST_KEY_SOLAR_SYNC_AT);
+    if(now>=sync&&now-sync<=72*60*60){
+      int rise=persist_read_int(PERSIST_KEY_SUNRISE_MIN);
+      int set=persist_read_int(PERSIST_KEY_SUNSET_MIN);
+      struct tm *local=localtime(&now);
+      if(local&&rise>=0&&rise<1440&&set>rise&&set<1440){
+        int minute=local->tm_hour*60+local->tm_min;
+        s_theme_dark=minute<rise||minute>=set;
+      }
+    }
+  }
   controls_set_theme_mode(s_theme_mode);
   controls_apply_settings(s_large_text,s_theme_dark);
   ha_audio_init();
