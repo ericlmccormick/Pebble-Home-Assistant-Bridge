@@ -282,16 +282,13 @@ static void select_short_click_handler(ClickRecognizerRef recognizer, void *cont
   }
 }
 
-static void voice_begin_after_navigation(void *context){
-  // Launch PebbleOS dictation after the Home menu has been popped.
-  // No intermediate idle/volume screen or extra Select press is required.
-  if(s_current_state==UI_STATE_IDLE)select_short_click_handler(NULL,NULL);
-}
 void controls_start_voice(void){
   ha_audio_stop();
   if(s_conversation_mode)conversation_disable();
+  // The home menu is popped without animation. Start PebbleOS dictation
+  // synchronously so the old idle "Press Select" screen never flashes.
   set_ui_state(UI_STATE_IDLE);
-  app_timer_register(300,voice_begin_after_navigation,NULL);
+  select_short_click_handler(NULL,NULL);
 }
 
 static void select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
