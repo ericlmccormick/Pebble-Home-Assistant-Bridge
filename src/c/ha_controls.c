@@ -59,6 +59,7 @@ static Layer *s_volume_settings_layer=NULL;
 static Layer *s_detail_layer=NULL;
 static int s_detail_index=-1,s_detail_level=-1;
 static bool s_detail_adjustable=false,s_detail_busy=false,s_detail_loading=false;
+static bool s_detail_secure=false,s_detail_armed=false;
 static char s_detail_note[42]="";
 static MenuLayer *s_home_menu=NULL,*s_menu=NULL,*s_settings_menu=NULL;
 static TextLayer *s_hint=NULL;
@@ -136,7 +137,8 @@ static GColor kind_color(uint8_t kind){
   switch(kind){
     case 1:return GColorChromeYellow; // lights
     case 3:return GColorVividCerulean; // fans
-    case 4:return GColorOrange; // covers
+    case 4:case 14:return GColorOrange; // covers and garage doors
+    case 13:return GColorVividCerulean; // locks
     case 5:case 11:return GColorChromeYellow; // bright for dark ink
     case 6:return GColorCyan; // bright for dark ink
     case 7:return GColorOrange; // bright for dark ink
@@ -170,6 +172,7 @@ static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,con
   // as unknown: never imply a device is ON before it has been checked.
   bool unknown=!state||!state[0]||strcmp(state,"unknown")==0;
   bool dimmed=state&&(strcmp(state,"off")==0||
+    strcmp(state,"closed")==0||strcmp(state,"locked")==0||
     strcmp(state,"unavailable")==0);
   // Unknown status is NOT an unknown device type. Draw the distinctive
   // lightbulb, fan blades, switch or scene glyph immediately in its category
@@ -205,6 +208,15 @@ static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,con
       graphics_fill_circle(ctx,GPoint(c.x,c.y-7),4);
       graphics_fill_circle(ctx,GPoint(c.x-7,c.y+5),4);
       graphics_fill_circle(ctx,GPoint(c.x+7,c.y+5),4);
+      break;
+    case 13: // front door lock: shackle and body
+      graphics_draw_round_rect(ctx,GRect(c.x-6,c.y-9,12,12),5);
+      graphics_fill_rect(ctx,GRect(c.x-8,c.y-1,16,11),0,GCornerNone);
+      break;
+    case 14: // garage door: roof rail and segmented moving panel
+      graphics_draw_rect(ctx,GRect(c.x-10,c.y-8,20,17));
+      graphics_draw_line(ctx,GPoint(c.x-9,c.y-3),GPoint(c.x+9,c.y-3));
+      graphics_draw_line(ctx,GPoint(c.x-9,c.y+3),GPoint(c.x+9,c.y+3));
       break;
     case 4: // shades
       graphics_draw_line(ctx,GPoint(c.x-9,c.y-8),GPoint(c.x+9,c.y-8));
@@ -283,6 +295,18 @@ static int catalog_index_for(MenuIndex *idx){
   if(idx->row>=s_room_sizes[sec]||vi>=s_visible_count)return -1;
   return s_visible[vi];
 }
+// Font metrics include internal leading; center the measured text rather
+// than the full 48px word-wrap box, then adjust for Pebble Gothic's ascent.
+static GRect aligned_row_text(const char *label,GFont font,GRect slot,bool wrap){
+  GTextOverflowMode overflow=wrap?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis;
+  GSize measured=graphics_text_layout_get_content_size(label,font,slot,overflow,GTextAlignmentLeft);
+  int h=measured.h;
+  if(h<24)h=24;
+  if(h>slot.size.h)h=slot.size.h;
+  int y=slot.origin.y+(slot.size.h-h)/2+4;
+  if(y+h>slot.origin.y+slot.size.h)y=slot.origin.y+slot.size.h-h;
+  return GRect(slot.origin.x,y,slot.size.w,h);
+}
 static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
   bool active=menu_cell_layer_is_highlighted(cell);
@@ -311,10 +335,12 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   // State is carried by the badge, not by a wasteful subtitle row.
   int left=x+34;
   int right=r->favorite?PBL_IF_ROUND_ELSE(34,21):PBL_IF_ROUND_ELSE(15,7);
-  int h=s_large_text?48:26;
+  int h=s_large_text?50:26;
   graphics_context_set_text_color(ctx,cell_fg(active));
-  graphics_draw_text(ctx,r->name,title_font(),
-    GRect(left,(b.size.h-h)/2,b.size.w-left-right,h),
+  GRect slot=GRect(left,0,b.size.w-left-right,b.size.h);
+  GRect label_box=s_large_text?aligned_row_text(r->name,title_font(),slot,true):
+    GRect(left,(b.size.h-h)/2,b.size.w-left-right,h);
+  graphics_draw_text(ctx,r->name,title_font(),label_box,
     s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,
     GTextAlignmentLeft,NULL);
   if(r->favorite){
@@ -486,6 +512,7 @@ static void detail_draw(Layer *layer,GContext *ctx){
   }
   const char *hint=s_detail_busy?"Updating...":
     s_detail_note[0]?s_detail_note:
+    s_detail_secure?(s_detail_armed?"SELECT again to confirm":"SELECT: choose action"):
     s_detail_adjustable?"UP / DOWN: level  |  SELECT: power":"SELECT: power";
   graphics_context_set_text_color(ctx,ui_muted());
   graphics_draw_text(ctx,hint,fonts_get_system_font(FONT_KEY_GOTHIC_14),
@@ -507,6 +534,27 @@ static void detail_up_click(ClickRecognizerRef recognizer,void *context){detail_
 static void detail_down_click(ClickRecognizerRef recognizer,void *context){detail_adjust_click(-1);}
 static void detail_select_click(ClickRecognizerRef recognizer,void *context){
   if(s_detail_busy||s_detail_loading||s_detail_index<0)return;
+  if(s_detail_secure){
+    if(!s_detail_armed){
+      s_detail_armed=true;
+      ControlRow *r=&s_rows[s_detail_index];
+      const char *action=r->kind==13?
+        (strcmp(r->state,"locked")==0?"UNLOCK":strcmp(r->state,"unlocked")==0?"LOCK":NULL):
+        (strcmp(r->state,"closed")==0?"OPEN":strcmp(r->state,"open")==0?"CLOSE":NULL);
+      if(!action){
+        s_detail_armed=false;
+        snprintf(s_detail_note,sizeof(s_detail_note),"State unknown; cannot move");
+      }else snprintf(s_detail_note,sizeof(s_detail_note),"Confirm %s: SELECT again",action);
+      layer_mark_dirty(s_detail_layer);
+      return;
+    }
+    if(send_command("CTRL_SECURE_ACT",s_detail_index)){
+      s_detail_armed=false;s_detail_busy=true;
+      snprintf(s_detail_note,sizeof(s_detail_note),"Sending command...");
+      layer_mark_dirty(s_detail_layer);
+    }
+    return;
+  }
   if(send_command("CTRL_ACT",s_detail_index)){
     s_detail_busy=true;s_detail_note[0]=0;layer_mark_dirty(s_detail_layer);
   }
@@ -526,10 +574,13 @@ static void detail_unload(Window *w){
   layer_destroy(s_detail_layer);s_detail_layer=NULL;
   window_destroy(s_detail_window);s_detail_window=NULL;
   s_detail_index=-1;s_detail_busy=false;s_detail_loading=false;
+  s_detail_secure=false;s_detail_armed=false;
 }
 static void detail_push(int index,bool fetch){
   if(s_detail_window||index<0||index>=s_count)return;
   s_detail_index=index;s_detail_level=-1;s_detail_adjustable=false;
+  s_detail_secure=s_rows[index].kind==4||s_rows[index].kind==13||s_rows[index].kind==14;
+  s_detail_armed=false;
   s_detail_busy=true;s_detail_loading=true;s_detail_note[0]=0;
   s_detail_window=window_create();
   window_set_window_handlers(s_detail_window,(WindowHandlers){
@@ -813,12 +864,13 @@ static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,20),b.size.h/2),(uint8_t)(idx->row+8),active,NULL);
   int x=PBL_IF_ROUND_ELSE(60,39);
   graphics_context_set_text_color(ctx,cell_fg(active));
-  // Center the title vertically against the icon, including when large
-  // accessibility text wraps; don't pin large titles to the top of each row.
-  int title_h=s_large_text?48:title_height();
-  int title_y=s_large_text?(b.size.h-title_h)/2-2:home_title_top();
-  graphics_draw_text(ctx,home_names[idx->row],title_font(),
-    GRect(x,title_y,b.size.w-x-7,title_h),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+  // Align measured visible glyphs, not the oversized logical word-wrap
+  // rectangle (which made Gothic labels appear above their icon centers).
+  GRect home_slot=GRect(x,0,b.size.w-x-7,b.size.h);
+  GRect home_label=s_large_text?aligned_row_text(home_names[idx->row],title_font(),home_slot,true):
+    GRect(x,home_title_top(),b.size.w-x-7,title_height());
+  graphics_draw_text(ctx,home_names[idx->row],title_font(),home_label,
+    s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   graphics_context_set_text_color(ctx,cell_sub(active));
   if(!s_large_text)graphics_draw_text(ctx,home_subs[idx->row],sub_font(),
     GRect(x,sub_top(),b.size.w-x-7,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
@@ -1028,6 +1080,7 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     }
     Tuple *t=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
     if(s_detail_window){
+      s_detail_armed=false;
       s_detail_busy=false;s_detail_loading=false;
       snprintf(s_detail_note,sizeof(s_detail_note),"%s",
         t?t->value->cstring:"Control failed");
