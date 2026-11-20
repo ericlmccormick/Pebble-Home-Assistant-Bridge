@@ -868,6 +868,9 @@ void controls_home_open(void){
   s_home=window_create();
   window_set_window_handlers(s_home,(WindowHandlers){.load=home_load,.unload=home_unload});
   window_stack_push(s_home,true);
+  // Preload only into phone RAM at app startup. No watch catalog/status
+  // messages are sent until a device section is opened.
+  send_command("CTRL_PREFETCH",-1);
 }
 void controls_receive(DictionaryIterator *iter,const char *command){
   if(strcmp(command,"CTRL_INVALIDATE")==0){
