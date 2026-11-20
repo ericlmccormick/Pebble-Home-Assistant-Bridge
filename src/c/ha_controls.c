@@ -166,7 +166,9 @@ static GColor badge_ink(bool selected){
 static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,const char *state){
   // Filled/bright = ON; outlined/muted = OFF. Unknown is muted as well.
   // Non-toggle items keep their original full-color category badge.
-  bool dimmed=state&&(strcmp(state,"off")==0||
+  // Metadata-only pages arrive before live status. Treat an empty state
+  // as unknown: never imply a device is ON before it has been checked.
+  bool dimmed=state&&(!state[0]||strcmp(state,"off")==0||
     strcmp(state,"unavailable")==0||strcmp(state,"unknown")==0);
   GColor ink=dimmed?(highlighted?ui_selected_fg():ui_muted()):badge_ink(highlighted);
   graphics_context_set_fill_color(ctx,
@@ -978,7 +980,13 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     }
     visible_rebuild();
     rooms_rebuild();
-    if(s_menu)menu_layer_reload_data(s_menu);
+    if(s_menu){
+      menu_layer_reload_data(s_menu);
+      if(page_changed&&s_count>0){
+        MenuIndex first={.section=(uint16_t)(s_page_offset>0?1:0),.row=0};
+        menu_layer_set_selected_index(s_menu,first,MenuRowAlignTop,false);
+      }
+    }
     if(s_hint)text_layer_set_text(s_hint,s_hint_text);
     return;
   }
