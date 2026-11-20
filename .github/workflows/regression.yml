@@ -22,6 +22,8 @@ jobs:
         run: node tests/sentence-prefetch.test.cjs
       - name: Day and night text, icon and selection contrast
         run: node tests/theme-contrast.test.cjs
+      - name: Home layout and navigation regression
+        run: node tests/home-layout-navigation.test.cjs
       - name: First-frame theme and cached solar times
         run: node tests/theme-startup.test.cjs
       - name: Offline catalog, scene actions, and visibility regression
