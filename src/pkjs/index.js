@@ -283,8 +283,10 @@ function deduplicateControlGroups(rows){
   return keys.map(function(key){
     var members=groups[key];
     function rank(r){
+      // A visible alias must win over a hidden one, even if the hidden
+      // alias was previously marked Favorite.
       var favored=favorites.indexOf(r.id)>=0?100:0;
-      var visible=hidden.indexOf(r.id)<0?30:0;
+      var visible=hidden.indexOf(r.id)<0?200:0;
       // Prefer direct HA light/fan entities over switch-powered mirrors.
       var nativeKind=controlKind(r.domain,r.name,r.id);
       var native=(nativeKind===1&&r.domain==='light')||
