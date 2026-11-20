@@ -231,6 +231,34 @@ function displayState(row){
   // A scene/script activation is an action, not an entity being switched on.
   return isRunAction(row.domain)?'Run':String(row.state||'unknown');
 }
+// The room header already supplies location. HA sometimes gives a fan and
+// light the identical friendly_name (e.g. both "Annie Cave"). Use the entity
+// domain to disambiguate instead of editing their Home Assistant entity IDs.
+function displayDeviceName(row){
+  var original=String(row.name||row.id||'Device').trim();
+  var room=String(row.room||'').trim();
+  var tail=original;
+  if(room&&room.toLowerCase()!=='unassigned'){
+    if(original.toLowerCase()===room.toLowerCase())tail='';
+    else if(original.toLowerCase().indexOf(room.toLowerCase()+' ')===0)
+      tail=original.slice(room.length).trim();
+    else if(original.toLowerCase().indexOf(room.toLowerCase()+' - ')===0)
+      tail=original.slice(room.length+3).trim();
+  }
+  if(!tail){
+    var domain=String(row.domain||'').toLowerCase();
+    if(domain==='fan')return 'Fan';
+    if(domain==='light')return 'Light';
+    if(domain==='switch')return 'Switch';
+    if(domain==='input_boolean')return 'Toggle';
+    if(domain==='cover')return 'Cover';
+    if(domain==='scene')return 'Scene';
+    if(domain==='script')return 'Script';
+    if(domain==='automation')return 'Automation';
+    return original;
+  }
+  return tail;
+}
 function deduplicateControls(rows){
   var favorites=favoriteIds(),byId={},keys=[];
   (rows||[]).forEach(function(r){
@@ -306,7 +334,7 @@ function configureWithDevices(rows){
     items.push({
       type:'checkboxgroup',
       messageKey:'DEV_'+i,
-      label:escapeSettingsText(String(r.name||r.id).slice(0,65)),
+      label:escapeSettingsText(displayDeviceName(r).slice(0,65)),
       defaultValue:[favorites.indexOf(r.id)>=0,hidden.indexOf(r.id)>=0],
       options:['Favorite','Hide']
     });
@@ -498,7 +526,7 @@ function normalizeCatalog(rows,mode){
       String(a.name||'').localeCompare(String(b.name||''))||
       String(a.id||'').localeCompare(String(b.id||''));
   }).map(function(r){
-    return {id:r.id,name:r.name,room:r.room,domain:r.domain,
+    return {id:r.id,name:displayDeviceName(r),room:r.room,domain:r.domain,
       favorite:favorites.indexOf(r.id)>=0};
   });
 }
