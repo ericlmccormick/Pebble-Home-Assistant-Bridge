@@ -67,7 +67,7 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  assert.strictEqual(devices.filter(x=>x.label==='Lamp').length,1,
    'Light and switch mirror of Annie Cave Lamp displays once');
  assert.strictEqual(devices.filter(x=>x.label==='Fan').length,2,
-   'Independent fans in Annie Cave and Attic remain separate);
+   'Independent fans in Annie Cave and Attic remain separate');
  // The device metadata sent to the watch uses the same compact labels.
  handlers.appmessage({payload:{COMMAND:'CTRL_REQUEST',CTRL_INDEX:0,CTRL_OFFSET:0,CTRL_REV:0}});
  await flush();
