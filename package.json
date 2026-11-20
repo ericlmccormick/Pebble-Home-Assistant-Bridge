@@ -118,6 +118,6 @@
       }
     ]
   },
-  "version": "1.6.6",
-  "description": "Home Assistant Control Center with mirrored-device grouping, correct light/fan differentiation, and synchronized favorite/hide settings"
+  "version": "1.6.7",
+  "description": "Home Assistant Control Center with six concurrent live state checks and serialized low-bandwidth watch updates"
 }
