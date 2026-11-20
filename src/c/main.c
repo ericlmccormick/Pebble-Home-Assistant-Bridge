@@ -7,6 +7,7 @@
 void controls_open(void);
 void controls_home_open(void);
 void controls_apply_settings(bool large,bool dark);
+void controls_set_theme_mode(int theme_mode);
 void controls_receive(DictionaryIterator *iter,const char *command);
 static void open_devices(ClickRecognizerRef recognizer, void *context) { controls_open(); }
 // The plugin API does not expose a raw, continuous microphone stream.
@@ -177,6 +178,27 @@ static void down_volume_handler(ClickRecognizerRef recognizer,void *context){
   ha_haptic();show_volume_indicator();
 }
 #endif
+// Shared with the Control Center's on-watch Volume settings page.
+// Use the exact same persisted volume and audio mixer as the voice UI.
+int controls_voice_volume_percent(void){
+#ifdef PBL_SPEAKER
+  return (int)(s_volume*100.0f+0.5f);
+#else
+  return -1;
+#endif
+}
+void controls_voice_volume_change(int direction){
+#ifdef PBL_SPEAKER
+  int pct=controls_voice_volume_percent()+10*(direction>=0?1:-1);
+  if(pct<0)pct=0;
+  if(pct>100)pct=100;
+  s_volume=pct/100.0f;
+  ha_audio_set_volume(s_volume);
+  persist_write_int(PERSIST_KEY_VOLUME,pct);
+#else
+  (void)direction;
+#endif
+}
 // Legacy SDK fallback: dictation produces recognized text, not raw PCM.
 // Reopen Pebble's dictation UI after each Home Assistant answer finishes.
 // Back on the Pebble dictation overlay is delivered as a rejected transcription;
@@ -415,6 +437,8 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       Tuple *font_tuple = dict_find(iterator, MESSAGE_KEY_FONT_SIZE);
       Tuple *large_tuple = dict_find(iterator, MESSAGE_KEY_LARGE_TEXT);
       Tuple *theme_tuple = dict_find(iterator, MESSAGE_KEY_THEME_DARK);
+      Tuple *theme_mode_tuple = dict_find(iterator, MESSAGE_KEY_THEME_MODE_CODE);
+      if(theme_mode_tuple)controls_set_theme_mode(theme_mode_tuple->value->int32);
       if(large_tuple)s_large_text=large_tuple->value->int32!=0;
       if(theme_tuple)s_theme_dark=theme_tuple->value->int32!=0;
       controls_apply_settings(s_large_text,s_theme_dark);
