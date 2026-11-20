@@ -21,6 +21,7 @@ typedef struct {
   char name[NAME_LEN], room[ROOM_LEN], state[STATE_LEN];
   uint8_t kind;
   bool favorite;
+  bool advanced;
 } ControlRow;
 typedef char cache_row_chunk_fits_persist_value[
   sizeof(ControlRow)*CACHE_ROWS_PER_KEY<=PERSIST_DATA_MAX_LENGTH?1:-1];
@@ -439,9 +440,9 @@ static void detail_push(int index){
 static void select_row(MenuLayer *m,MenuIndex *idx,void *data){
   int catalog_index=catalog_index_for(idx);
   if(catalog_index<0)return;
-  // One-shot scenes, scripts and automations still run directly.
-  uint8_t kind=s_rows[catalog_index].kind;
-  if(kind!=5&&kind!=6&&kind!=7){detail_push(catalog_index);return;}
+  // Open detail only for devices with a reported adjustable capability.
+  // On/off lights, switches, and fans toggle immediately from the list.
+  if(s_rows[catalog_index].advanced){detail_push(catalog_index);return;}
   bool queued=send_command("CTRL_ACT",catalog_index);
   snprintf(s_hint_text,sizeof(s_hint_text),"%s",queued?"Sending command...":"Phone busy, retry");
   if(s_hint)text_layer_set_text(s_hint,s_hint_text);
@@ -629,6 +630,7 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     Tuple *room=dict_find(iter,MESSAGE_KEY_CTRL_ROOM);
     Tuple *kind=dict_find(iter,MESSAGE_KEY_CTRL_KIND);
     Tuple *fav=dict_find(iter,MESSAGE_KEY_CTRL_FAV);
+    Tuple *advanced=dict_find(iter,MESSAGE_KEY_CTRL_ADVANCED);
     if(!i||!n||!st)return;
     int index=i->value->int32;
     if(index<0||index>=CONTROL_MAX)return;
@@ -637,6 +639,7 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     snprintf(s_rows[index].room,sizeof(s_rows[index].room),"%s",room?room->value->cstring:"Unassigned");
     s_rows[index].kind=kind?(uint8_t)kind->value->int32:0;
     s_rows[index].favorite=fav?fav->value->int32!=0:false;
+    s_rows[index].advanced=advanced?advanced->value->int32!=0:false;
     if(index>=s_count)s_count=index+1;
     s_catalog_dirty=true;
     return;
