@@ -291,20 +291,22 @@ function configureWithDevices(rows){
       var data=page.meta.userData||{};
       var flags=data.primaryDeviceFlags||[];
       var control=page.getItemByMessageKey('SHOW_ALL_DEVICES');
-      var toggleRoot=control&&control.$element&&control.$element[0];
-      var toggle=toggleRoot&&toggleRoot.querySelector('input[type="checkbox"]');
       var elements=flags.map(function(flag,i){
         var item=page.getItemByMessageKey('DEV_'+i);
         return item&&item.$element&&item.$element[0];
       });
+      // Clay's item.get() reads the actual toggle state, including persisted
+      // clay-settings. Its .on() hooks the manipulator input directly.
+      // Relying on querySelector against Clay's minified $element failed in
+      // some Android webviews, leaving the view permanently unfiltered.
       function render(){
-        var all=toggle?!!toggle.checked:!!data.showAllDefault;
+        var all=control?!!control.get():!!data.showAllDefault;
         for(var i=0;i<flags.length;i++){
           var row=elements[i];
           if(row)row.classList.toggle('ha-device-filter-hidden',!all&&!flags[i]);
         }
       }
-      if(toggle)toggle.addEventListener('change',render);
+      if(control)control.on('change',render);
       render();
     });
   },{autoHandleEvents:false});
