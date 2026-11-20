@@ -2,7 +2,7 @@ name: Build and publish direct PBW
 on:
   workflow_dispatch:
   push:
-    branches: [continuous-native-conversation, fix/theme-first-frame]
+    branches: [continuous-native-conversation, fix/compact-home-direct-voice-room-header]
     paths:
       - 'package.json'
       - 'src/**'
@@ -40,6 +40,7 @@ jobs:
           node tests/sentence-prefetch.test.cjs
           node tests/theme-contrast.test.cjs
           node tests/theme-startup.test.cjs
+          node tests/home-layout-navigation.test.cjs
           node tests/control-cache.test.cjs
           node tests/status-concurrency.test.cjs
           node tests/startup-prefetch.test.cjs
@@ -72,13 +73,13 @@ jobs:
           path: direct-download/home-assistant-ai.pbw
           if-no-files-found: error
       - name: Publish directly installable PBW to GitHub Releases
-        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/fix/theme-first-frame'
+        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/fix/compact-home-direct-voice-room-header'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG=dev-theme-first-frame
-          if [[ "$GITHUB_REF_NAME" != "fix/theme-first-frame" ]]; then TAG=dev-continuous-native-conversation; fi
+          TAG=dev-compact-home-direct-voice-room-header
+          if [[ "$GITHUB_REF_NAME" != "fix/compact-home-direct-voice-room-header" ]]; then TAG=dev-continuous-native-conversation; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" \
               --title "Latest development PBW" --prerelease \
