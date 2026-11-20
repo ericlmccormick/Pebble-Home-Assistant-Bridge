@@ -66,22 +66,22 @@ function node(){
   const changes=[];
   const switchInput={
     checked:false,
-    addEventListener:(name,fn)=>{assert.strictEqual(name,'change');changes.push(fn);}
+    get(){return this.checked;},
+    on(name,fn){assert.strictEqual(name,'change');changes.push(fn);}
   };
   const page={
     EVENTS:{AFTER_BUILD:'AFTER_BUILD'},meta:clay.meta,
     on:(name,fn)=>{callbacks[name]=fn;},
     getItemByMessageKey:key=>key==='SHOW_ALL_DEVICES'?
-      {$element:[{querySelector:sel=>{
-        assert.strictEqual(sel,'input[type="checkbox"]');
-        return switchInput;
-      }}]}:deviceItems[key],
+      switchInput:deviceItems[key],
     getItemById:()=>{throw Error('Room headers must not be mutated');}
   };
   clay.customFn.call(page);
   assert.strictEqual(typeof callbacks.AFTER_BUILD,'function');
   callbacks.AFTER_BUILD();
-  assert.strictEqual(changes.length,1,'Change handler is registered');
+  assert.strictEqual(changes.length,1,'Clay native change handler is registered');
+  assert(js.includes('control.get()')&&js.includes("control.on('change',render)"),
+    'Filter must use Clay item API, not fragile DOM querySelector');
 
   function hidden(label){return records[label].classList.contains('ha-device-filter-hidden');}
   function roomHidden(room){return headings[room].classList.contains('ha-room-filter-hidden');}
