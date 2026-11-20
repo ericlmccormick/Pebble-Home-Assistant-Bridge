@@ -138,6 +138,7 @@ var clayConfig=[
 ];
 var clay=new Clay(clayConfig,null,{autoHandleEvents:false});
 var favoriteConfigRows=[];
+var favoriteConfigGroups=[];
 
 var CATALOG_CACHE_KEY='HA_CONTROLS_CACHE_V1';
 var CATALOG_FETCH_AT_KEY='HA_CONTROLS_FETCHED_AT_V2';
@@ -259,17 +260,48 @@ function displayDeviceName(row){
   }
   return tail;
 }
-function deduplicateControls(rows){
-  var favorites=favoriteIds(),byId={},keys=[];
+function deduplicateControlGroups(rows){
+  var favorites=favoriteIds(),hidden=hiddenIds(),byId={},ids=[];
   (rows||[]).forEach(function(r){
     if(!r||!r.id)return;
-    var id=String(r.id).toLowerCase();
-    if(!byId[id]){byId[id]=r;keys.push(id);}
-    else if(favorites.indexOf(r.id)>=0)byId[id]=r;
+    var key=String(r.id).toLowerCase();
+    if(!byId[key])ids.push(key);
+    byId[key]=r; // Collapse identical entity IDs returned on multiple pages.
   });
-  // Different HA entity IDs are independently controllable, even if they
-  // share friendly_name and domain. Do not silently merge them.
-  return keys.map(function(key){return byId[key];});
+  var groups={},keys=[];
+  ids.forEach(function(id){
+    var r=byId[id];
+    // Match room-relative label AND effective device type. A fan and light
+    // both named "Annie Cave" are never the same control.
+    var room=String(r.room||'Unassigned').trim().toLowerCase();
+    var label=displayDeviceName(r).trim().toLowerCase();
+    var kind=controlKind(r.domain,r.name,r.id);
+    var key=room+'|'+label+'|'+kind;
+    if(!groups[key]){groups[key]=[];keys.push(key);}
+    groups[key].push(r);
+  });
+  return keys.map(function(key){
+    var members=groups[key];
+    function rank(r){
+      var favored=favorites.indexOf(r.id)>=0?100:0;
+      var visible=hidden.indexOf(r.id)<0?30:0;
+      // Prefer direct HA light/fan entities over switch-powered mirrors.
+      var nativeKind=controlKind(r.domain,r.name,r.id);
+      var native=(nativeKind===1&&r.domain==='light')||
+        (nativeKind===3&&r.domain==='fan');
+      return favored+visible+(native?10:0);
+    }
+    var representative=members[0];
+    members.forEach(function(r){
+      if(rank(r)>rank(representative)||
+        (rank(r)===rank(representative)&&r.id<representative.id))
+        representative=r;
+    });
+    return {row:representative,ids:members.map(function(r){return r.id;})};
+  });
+}
+function deduplicateControls(rows){
+  return deduplicateControlGroups(rows).map(function(group){return group.row;});
 }
 function configureWithDevices(rows){
   var cfg=clayConfig.slice();
@@ -277,11 +309,12 @@ function configureWithDevices(rows){
   // Distinct IDs can produce duplicate Home Assistant rows (an exposed
   // helper and its mirrored entity). Prefer explicitly favorited records
   // when names, rooms and domains are otherwise identical.
-  favoriteConfigRows=deduplicateControls(rows).sort(function(a,b){
-    return String(a.room||'').localeCompare(String(b.room||''))||
-      String(a.name||'').localeCompare(String(b.name||''))||
-      String(a.id||'').localeCompare(String(b.id||''));
+  favoriteConfigGroups=deduplicateControlGroups(rows).sort(function(a,b){
+    return String(a.row.room||'').localeCompare(String(b.row.room||''))||
+      displayDeviceName(a.row).localeCompare(displayDeviceName(b.row))||
+      String(a.row.id||'').localeCompare(String(b.row.id||''));
   });
+  favoriteConfigRows=favoriteConfigGroups.map(function(group){return group.row;});
   var items=[
     {type:'heading',defaultValue:'Watch devices'},
     {type:'text',defaultValue:'Tap the star to favorite or the crossed circle to hide. Hidden favorites remain saved.'},
@@ -386,15 +419,18 @@ Pebble.addEventListener('webviewclosed',function(e){
       // Also tolerate 1/0 values, and leave existing preferences unchanged
       // when a field is absent (e.g., a cancelled or partial config page).
       if(!Array.isArray(selections)||selections.length<2)return;
-      var oldFavorite=chosen.indexOf(r.id)>=0;
-      var oldHidden=hidden.indexOf(r.id)>=0;
+      var group=favoriteConfigGroups[i]||{ids:[r.id]};
       var newFavorite=valueBoolean(selections[0],false);
       var newHidden=valueBoolean(selections[1],false);
-      if(newFavorite!==oldFavorite||newHidden!==oldHidden)visibilityChanged=true;
-      chosen=chosen.filter(function(id){return id!==r.id;});
-      hidden=hidden.filter(function(id){return id!==r.id;});
-      if(newFavorite)chosen.push(r.id);
-      if(newHidden)hidden.push(r.id);
+      group.ids.forEach(function(id){
+        var oldFavorite=chosen.indexOf(id)>=0;
+        var oldHidden=hidden.indexOf(id)>=0;
+        if(newFavorite!==oldFavorite||newHidden!==oldHidden)visibilityChanged=true;
+        chosen=chosen.filter(function(saved){return saved!==id;});
+        hidden=hidden.filter(function(saved){return saved!==id;});
+        if(newFavorite)chosen.push(id);
+        if(newHidden)hidden.push(id);
+      });
     });
     localStorage.setItem('HA_FAVORITES_V1',JSON.stringify(chosen));
     localStorage.setItem('HA_HIDDEN_V1',JSON.stringify(hidden));
