@@ -255,16 +255,37 @@ static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,con
 }
 // Device rows remain indexed by the phone's original catalog order. Room
 // headers are visual MenuLayer sections and MUST NOT change CTRL_ACT indices.
+// A page has local catalog indices. Navigation sections do not map to
+// entities and never send control commands.
+static uint16_t base_sections(void){
+  return s_mode==0&&s_room_count>0?s_room_count:1;
+}
+static int nav_action(MenuIndex *idx){
+  if(s_page_offset>0&&idx->section==0)return -1;
+  if(s_has_more&&idx->section==base_sections()+(s_page_offset>0?1:0))return 1;
+  return 0;
+}
 static int catalog_index_for(MenuIndex *idx){
-  if(s_mode!=0)return idx->row<s_visible_count?s_visible[idx->row]:-1;
-  if(s_room_count==0||idx->section>=s_room_count)return -1;
-  int visible_index=s_room_starts[idx->section]+idx->row;
-  if(idx->row>=s_room_sizes[idx->section]||visible_index>=s_visible_count)return -1;
-  return s_visible[visible_index];
+  if(nav_action(idx)!=0)return -1;
+  uint16_t sec=idx->section-(s_page_offset>0?1:0);
+  if(s_mode!=0)return sec==0&&idx->row<s_visible_count?s_visible[idx->row]:-1;
+  if(s_room_count==0||sec>=s_room_count)return -1;
+  int vi=s_room_starts[sec]+idx->row;
+  if(idx->row>=s_room_sizes[sec]||vi>=s_visible_count)return -1;
+  return s_visible[vi];
 }
 static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
   bool active=menu_cell_layer_is_highlighted(cell);
+  int nav=nav_action(idx);
+  if(nav){
+    graphics_context_set_text_color(ctx,cell_fg(active));
+    char label[42];
+    snprintf(label,sizeof(label),"%s",nav>0?"More devices  >":"<  Previous devices");
+    graphics_draw_text(ctx,label,title_font(),GRect(10,6,b.size.w-20,b.size.h-8),
+      GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+    return;
+  }
   if(!s_visible_count){
     graphics_context_set_text_color(ctx,cell_fg(active));
     graphics_draw_text(ctx,s_loading?"Loading devices...":"No devices to show",
@@ -384,17 +405,20 @@ static void catalog_request_if_due(void){
   s_sync_pending=send_command("CTRL_REQUEST",s_mode);
 }
 static uint16_t num_sections(MenuLayer *m,void *data){
-  return s_mode==0&&s_room_count>0?s_room_count:1;
+  return base_sections()+(s_page_offset>0?1:0)+(s_has_more?1:0);
 }
 static int16_t room_header_height(MenuLayer *m,uint16_t section,void *data){
+  if((s_page_offset>0&&section==0)||
+     (s_has_more&&section==base_sections()+(s_page_offset>0?1:0)))return 0;
   return s_mode==0&&s_room_count>0?(s_large_text?28:24):0;
 }
 static void draw_room_header(GContext *ctx,const Layer *cell,uint16_t section,void *data){
-  if(s_mode!=0||section>=s_room_count)return;
+  if(s_mode!=0||s_room_count==0||nav_action(&(MenuIndex){.section=section,.row=0}))return;
+  uint16_t sec=section-(s_page_offset>0?1:0);
+  if(sec>=s_room_count)return;
   GRect b=layer_get_bounds(cell);
   char title[ROOM_LEN];
-  snprintf(title,sizeof(title),"%s",s_rooms[section]);
-  // Match Google Home's quiet, uppercase room dividers without changing IDs.
+  snprintf(title,sizeof(title),"%s",s_rooms[sec]);
   for(char *p=title;*p;p++)if(*p>='a'&&*p<='z')*p-=('a'-'A');
   graphics_context_set_text_color(ctx,ui_muted());
   graphics_draw_text(ctx,title,
@@ -405,9 +429,12 @@ static void draw_room_header(GContext *ctx,const Layer *cell,uint16_t section,vo
     PBL_IF_ROUND_ELSE(GTextAlignmentCenter,GTextAlignmentLeft),NULL);
 }
 static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){
+  if((s_page_offset>0&&section==0)||
+     (s_has_more&&section==base_sections()+(s_page_offset>0?1:0)))return 1;
+  uint16_t sec=section-(s_page_offset>0?1:0);
   if(s_mode==0&&s_room_count>0)
-    return section<s_room_count?s_room_sizes[section]:0;
-  return section==0?(s_visible_count?s_visible_count:1):0;
+    return sec<s_room_count?s_room_sizes[sec]:0;
+  return sec==0?(s_visible_count?s_visible_count:1):0;
 }
 
 static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){
@@ -491,7 +518,7 @@ static void detail_unload(Window *w){
   window_destroy(s_detail_window);s_detail_window=NULL;
   s_detail_index=-1;s_detail_busy=false;s_detail_loading=false;
 }
-static void detail_push(int index){
+static void detail_push(int index,bool fetch){
   if(s_detail_window||index<0||index>=s_count)return;
   s_detail_index=index;s_detail_level=-1;s_detail_adjustable=false;
   s_detail_busy=true;s_detail_loading=true;s_detail_note[0]=0;
@@ -500,20 +527,34 @@ static void detail_push(int index){
     .load=detail_load,.unload=detail_unload});
   window_set_click_config_provider(s_detail_window,detail_click_config);
   window_stack_push(s_detail_window,true);
-  if(!send_command("CTRL_DETAILS",index)){
+  if(fetch&&!send_command("CTRL_DETAILS",index)){
     s_detail_busy=false;s_detail_loading=false;
     snprintf(s_detail_note,sizeof(s_detail_note),"Phone busy; reopen");
     if(s_detail_layer)layer_mark_dirty(s_detail_layer);
   }
 }
 static void select_row(MenuLayer *m,MenuIndex *idx,void *data){
-  int catalog_index=catalog_index_for(idx);
-  if(catalog_index<0)return;
-  // Open detail only for devices with a reported adjustable capability.
-  // On/off lights, switches, and fans toggle immediately from the list.
-  if(s_rows[catalog_index].advanced){detail_push(catalog_index);return;}
-  bool queued=send_command("CTRL_ACT",catalog_index);
-  snprintf(s_hint_text,sizeof(s_hint_text),"%s",queued?"Sending command...":"Phone busy, retry");
+  int nav=nav_action(idx);
+  if(nav){
+    if(s_sync_pending)return;
+    int target=s_page_offset+(nav>0?PAGE_SIZE:-PAGE_SIZE);
+    if(target<0)target=0;
+    s_request_offset=target;
+    s_sync_pending=send_command("CTRL_REQUEST",s_mode);
+    if(s_sync_pending){
+      s_loading=true;
+      snprintf(s_hint_text,sizeof(s_hint_text),"Loading devices...");
+    }else snprintf(s_hint_text,sizeof(s_hint_text),"Phone busy; retry");
+    if(s_hint)text_layer_set_text(s_hint,s_hint_text);
+    return;
+  }
+  int index=catalog_index_for(idx);
+  if(index<0)return;
+  // Names and rooms appear immediately; get_state and capability detection
+  // occur only when the user selects a device.
+  bool queued=send_command("CTRL_INSPECT",index);
+  snprintf(s_hint_text,sizeof(s_hint_text),"%s",
+    queued?"Checking device...":"Phone busy; retry");
   if(s_hint)text_layer_set_text(s_hint,s_hint_text);
 }
 static void list_load(Window *w){
