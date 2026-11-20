@@ -97,8 +97,8 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   h.handlers.showConfiguration();
   const cfg=h.configs[h.configs.length-1];
   const sections=cfg.filter(x=>x.type==='section');
-  assert.deepStrictEqual(sections.map(x=>x.items[0].defaultValue),
-    ['Display','Home Assistant Bridge','Watch devices']);
+  assert.strictEqual(sections.map(x=>x.items[0].defaultValue).join('|'),
+    'Display|Home Assistant Bridge|Watch devices');
   const devices=sections[2].items.filter(x=>x.type==='checkboxgroup');
   assert.strictEqual(devices.length,97);
   assert.strictEqual(devices[96].messageKey,'DEV_96');
