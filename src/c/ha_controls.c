@@ -923,7 +923,8 @@ void controls_receive(DictionaryIterator *iter,const char *command){
   if(strcmp(command,"CTRL_STATE")==0){
     Tuple *i=dict_find(iter,MESSAGE_KEY_CTRL_INDEX);
     Tuple *st=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
-    if(!i||!st)return;
+    Tuple *rev=dict_find(iter,MESSAGE_KEY_CTRL_REV);
+    if(!i||!st||!rev||rev->value->int32!=s_catalog_revision)return;
     int index=i->value->int32;
     if(index<0||index>=s_count)return;
     snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
