@@ -305,7 +305,9 @@ static GRect aligned_row_text(const char *label,GFont font,GRect slot,bool wrap)
   int h=measured.h;
   if(h<24)h=24;
   if(h>slot.size.h)h=slot.size.h;
-  int y=slot.origin.y+(slot.size.h-h)/2+4;
+  // Gothic's reported layout box already includes substantial ascender/leading.
+  // No extra +4px: that pushed menu text below its icon in large mode.
+  int y=slot.origin.y+(slot.size.h-h)/2;
   if(y+h>slot.origin.y+slot.size.h)y=slot.origin.y+slot.size.h-h;
   return GRect(slot.origin.x,y,slot.size.w,h);
 }
@@ -339,15 +341,17 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int right=r->favorite?PBL_IF_ROUND_ELSE(34,21):PBL_IF_ROUND_ELSE(15,7);
   int width=b.size.w-left-right;
   graphics_context_set_text_color(ctx,cell_fg(active));
+  // Large mode has two nonoverlapping text bands: title at the top,
+  // subtitle/status below. Single-line ellipsis avoids hidden lower text.
   graphics_draw_text(ctx,r->name,title_font(),
-    GRect(left,s_large_text?2:1,width,s_large_text?34:26),
+    GRect(left,s_large_text?-3:0,width,s_large_text?34:25),
     GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   // Metadata is available before live status; never claim it is current.
   const char *subtitle=r->subtitle[0]?r->subtitle:
     ((r->kind==5||r->kind==6||r->kind==7)?"Tap to run":"Reading...");
   graphics_context_set_text_color(ctx,cell_sub(active));
   graphics_draw_text(ctx,subtitle,sub_font(),
-    GRect(left,s_large_text?37:25,width,s_large_text?27:23),
+    GRect(left,s_large_text?33:24,width,s_large_text?25:23),
     GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   if(r->favorite){
     graphics_context_set_text_color(ctx,cell_sub(active));
@@ -480,7 +484,7 @@ static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){
 
 static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){
   // Home screen retains two-line descriptions; device menu rows are compact.
-  return m==s_home_menu?row_height():(s_large_text?68:50);
+  return m==s_home_menu?row_height():(s_large_text?64:50);
 }
 
 static void detail_draw(Layer *layer,GContext *ctx){
@@ -1050,7 +1054,9 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     s_last_sync_at=time(NULL);
     if(page_changed){
       if(!catalog_store()){
-        s_catalog_revision=0;
+        // Disk cache failure must NEVER invalidate the active in-memory
+        // page revision. Otherwise every incoming CTRL_STATE is rejected,
+        // leaving all device statuses stuck at "Reading...".
         persist_write_int(CACHE_REV_KEY,0);
       }
     }else{
