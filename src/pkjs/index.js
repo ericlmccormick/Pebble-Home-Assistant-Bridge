@@ -179,7 +179,7 @@ function fetchControlsIfStale(force){
         }
       });
       // Older plugin versions ignore offset and repeat the first page.
-      if(page.length===48&&added>0&&offset+48<240)
+      if(page.length===48&&added>0&&offset+48<960)
         return getPage(offset+48,all,seen);
       return all;
     });
@@ -189,12 +189,19 @@ function fetchControlsIfStale(force){
     return rows;
   }).then(function(rows){catalogPromise=null;return rows;},function(err){
     catalogPromise=null;
-    if(cached.length){console.log('Using cached controls: '+String(err&&err.message||err));return cached;}
+    if(!force&&cached.length){console.log('Using cached controls: '+String(err&&err.message||err));return cached;}
     throw err;
   });
   return catalogPromise;
 }
-function controlKind(domain){
+function isFanControl(row){
+  return row&&(
+    row.domain==='fan'||
+    (row.domain==='switch'&&/\\b(fan|ventilator|exhaust|air.handler)\\b/i.test(String(row.name||row.id||'')))
+  );
+}
+function controlKind(domain,name){
+  if(isFanControl({domain:domain,name:name}))return 3;
   return {light:1,switch:2,input_boolean:2,fan:3,cover:4,scene:5,script:6,automation:7}[domain]||0;
 }
 function isRunAction(domain){return /^(scene|script|automation)$/.test(String(domain||''));}
@@ -219,7 +226,7 @@ function configureWithDevices(rows){
   var items=[
     {type:'heading',defaultValue:'Watch devices'},
     {type:'text',defaultValue:'Tap the star to favorite or the crossed circle to hide. Hidden favorites remain saved.'},
-    {type:'toggle',messageKey:'REFRESH_DEVICES',label:'Refresh devices and rooms',
+    {type:'toggle',messageKey:'REFRESH_DEVICES',label:'Force recheck now (Bridge)',
       defaultValue:false},
     // Keep the actual Clay checkbox inputs. Only restyle their two visible
     // controls into the right-aligned icon buttons used by Google Home.
@@ -296,6 +303,7 @@ function sendWatchSettings(preview){
   if(themeMode==='auto'&&weatherSunrise&&weatherSunset)
     localStorage.setItem('HA_LAST_AUTO_DARK',String(dark));
   Pebble.sendAppMessage({COMMAND:'SETTINGS',FONT_SIZE:fontChoice==='large'?28:24,
+    THEME_MODE_CODE:themeMode==='night'?1:themeMode==='day'?0:2,
     LARGE_TEXT:fontChoice==='large'?1:0,THEME_DARK:dark?1:0,
     AUTO_SEND:autoSend?1:0,HAPTIC_LEVEL:hapticValues[hapticLevel]||0},
     function(){
@@ -334,8 +342,7 @@ Pebble.addEventListener('webviewclosed',function(e){
     }
   }
   if(valueBoolean(field('REFRESH_DEVICES'),false)){
-    localStorage.removeItem(CATALOG_FETCH_AT_KEY);
-    Pebble.sendAppMessage({COMMAND:'CTRL_INVALIDATE'},null,function(){});
+    forceRefreshControls();
   }
   if(field('ENABLE_TTS')!==undefined){
     enableTts=valueBoolean(field('ENABLE_TTS'),enableTts);
@@ -440,8 +447,8 @@ function normalizeCatalog(rows){
   var favorites=favoriteIds(),hidden=hiddenIds();
   return rows.filter(function(r){return r&&typeof r.id==='string'&&hidden.indexOf(r.id)<0;})
     .sort(function(a,b){
-      var pa=favorites.indexOf(a.id)>=0?0:a.domain==='fan'?1:2;
-      var pb=favorites.indexOf(b.id)>=0?0:b.domain==='fan'?1:2;
+      var pa=favorites.indexOf(a.id)>=0?0:isFanControl(a)?1:2;
+      var pb=favorites.indexOf(b.id)>=0?0:isFanControl(b)?1:2;
       return pa-pb||String(a.room||'').localeCompare(String(b.room||''))||
         String(a.name||'').localeCompare(String(b.name||''))||
         String(a.id).localeCompare(String(b.id));
@@ -478,7 +485,7 @@ function controlRow(r,index){
     CTRL_NAME:String(r.name||'Device').slice(0,35),
     CTRL_STATUS:String(r.state||'unknown').slice(0,11),
     CTRL_ROOM:String(r.room||'Unassigned').slice(0,21),
-    CTRL_KIND:controlKind(r.domain),CTRL_FAV:r.favorite?1:0,
+    CTRL_KIND:controlKind(r.domain,r.name),CTRL_FAV:r.favorite?1:0,
     CTRL_ADVANCED:r.advanced?1:0};
 }
 function sendCatalog(watchRevision,rows){
@@ -512,6 +519,29 @@ function sendCatalog(watchRevision,rows){
     });
   }
   sendAt(0);
+}
+var forceRefreshPromise=null;
+function forceRefreshControls(){
+  // Explicit force refresh is different from hourly polling:
+  // bypass the phone cache, walk every Bridge discovery page, then push
+  // a complete catalog to the watch immediately (even if unchanged).
+  if(forceRefreshPromise)return forceRefreshPromise;
+  localStorage.removeItem(CATALOG_FETCH_AT_KEY);
+  forceRefreshPromise=fetchControlsIfStale(true).then(function(rows){
+    sendCatalog(0,rows);
+    return rows;
+  }).catch(function(err){
+    console.log('Forced control discovery failed: '+String(err&&err.message||err));
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:'Refresh failed: '+String(err.message||err).slice(0,11)});
+    throw err;
+  }).then(function(value){
+    forceRefreshPromise=null;
+    return value;
+  },function(err){
+    forceRefreshPromise=null;
+    throw err;
+  });
+  return forceRefreshPromise;
 }
 function controlLoad(watchRevision){
   fetchControlsIfStale(false).then(function(rows){
@@ -633,6 +663,25 @@ Pebble.addEventListener('appmessage',function(event){
   var d=event.payload||{};
   if(audio.handleMessage(d))return;
   if(d.COMMAND==='CTRL_REQUEST'){controlLoad(Number(d.CTRL_REV)||0);return;}
+  if(d.COMMAND==='CTRL_FORCE_REFRESH'){
+    forceRefreshControls().catch(function(){});return;
+  }
+  if(d.COMMAND==='CTRL_THEME_SET'){
+    var m=Number(d.CTRL_INDEX);
+    if(m>=0&&m<=2){
+      themeMode=m===0?'day':m===1?'night':'auto';
+      localStorage.setItem('HA_THEME_MODE',themeMode);
+      updateWeatherSubscription();
+      sendWatchSettings(false);
+    }
+    return;
+  }
+  if(d.COMMAND==='CTRL_FONT_SET'){
+    fontChoice=Number(d.CTRL_INDEX)===1?'large':'normal';
+    localStorage.setItem('FONT_CHOICE',fontChoice);
+    localStorage.setItem('FONT_SIZE',String(fontChoice==='large'?28:24));
+    sendWatchSettings(false);return;
+  }
   if(d.COMMAND==='CTRL_ACT'){controlAct(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND==='CTRL_DETAILS'){controlDetails(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND==='CTRL_ADJUST'){controlAdjust(Number(d.CTRL_INDEX),Number(d.CTRL_DIRECTION));return;}
