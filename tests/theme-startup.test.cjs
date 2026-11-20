@@ -14,6 +14,22 @@ assert(init.indexOf('persist_read_int(PERSIST_KEY_THEME_DARK)')<init.indexOf('wi
 assert(init.indexOf('controls_apply_settings(s_large_text,s_theme_dark)')<init.indexOf('controls_home_open()'),
   'Home menu uses restored theme before first draw');
 assert(CTRL.includes('window_set_background_color(w,ui_bg())'),'Home menu draws from restored colors');
+assert(C.includes('persist_read_int(PERSIST_KEY_SUNRISE_MIN)'));
+assert(C.includes('persist_read_int(PERSIST_KEY_SUNSET_MIN)'));
+assert(C.includes('persist_write_int(PERSIST_KEY_SUNRISE_MIN,sunrise)'));
+assert(C.includes('persist_write_int(PERSIST_KEY_SUNSET_MIN,sunset)'));
+assert(init.includes('s_theme_dark=minute<rise||minute>=set;'),
+  'First-frame Auto appearance is recalculated from watch clock and cached solar times');
+assert(init.indexOf('s_theme_dark=minute<rise||minute>=set;')<
+  init.indexOf('window_stack_push(s_main_window, true)'),
+  'Solar correction must precede first frame');
+const manifest=require('../package.json');
+for(const key of ['THEME_SUNRISE_MIN','THEME_SUNSET_MIN','THEME_SOLAR_SYNC_AT']){
+  assert(manifest.pebble.messageKeys.includes(key));
+  assert(JS.includes('message.'+key));
+  assert(C.includes('MESSAGE_KEY_'+key));
+}
+
 assert(JS.includes('Date.now()-72*3600*1000'),'Solar cache is valid for up to 72 hours');
 const begin=JS.indexOf('function effectiveThemeDark()');
 const end=JS.indexOf('function onWeatherEnvelope(',begin);
