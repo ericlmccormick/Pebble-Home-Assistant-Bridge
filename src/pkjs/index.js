@@ -16,7 +16,7 @@ var weatherSunrise=0,weatherSunset=0;
 var weatherUpdatedAt=0;
 try {
   var weatherSaved=JSON.parse(localStorage.getItem('HA_WEATHER_SUN_V1')||'null');
-  if(weatherSaved&&Number(weatherSaved.savedAt)>Date.now()-24*3600*1000){
+  if(weatherSaved&&Number(weatherSaved.savedAt)>Date.now()-72*3600*1000){
     weatherSunrise=Number(weatherSaved.sunrise)||0;
     weatherSunset=Number(weatherSaved.sunset)||0;
     weatherUpdatedAt=Number(weatherSaved.savedAt)||0;
@@ -32,13 +32,29 @@ function sunEpoch(v){
 function effectiveThemeDark(){
   if(themeMode==='night')return true;
   if(themeMode==='day')return false;
-  // In Auto, follow Weather+ local sunrise/sunset. Never force an
-  // arbitrary 6 AM / 6 PM schedule when solar data is absent.
-  var now=Math.floor(Date.now()/1000);
-  if(weatherSunrise>0&&weatherSunset>weatherSunrise&&Date.now()-weatherUpdatedAt<24*3600*1000)
-    return now<weatherSunrise||now>=weatherSunset;
-  // Deterministic fallback without a Weather+ source: system appearance
-  // is not observable in PebbleKit JS; retain last cached theme or day.
+  // Reuse the local clock time of the last known sunrise/sunset for up to
+  // 72 hours, even across midnight. Do not compare today's clock directly
+  // with yesterday's epoch timestamps (that incorrectly forces Night).
+  // Date.setFullYear/setHours resolve DST changes using the phone timezone.
+  var nowMs=Date.now();
+  if(weatherSunrise>0&&weatherSunset>weatherSunrise&&
+     weatherUpdatedAt>0&&nowMs-weatherUpdatedAt>=0&&
+     nowMs-weatherUpdatedAt<72*3600*1000){
+    var sunriseThen=new Date(weatherSunrise*1000);
+    var sunsetThen=new Date(weatherSunset*1000);
+    var nowDate=new Date(nowMs);
+    function solarToday(source){
+      var today=new Date(nowDate.getTime());
+      today.setHours(source.getHours(),source.getMinutes(),source.getSeconds(),0);
+      return today.getTime();
+    }
+    var sunriseToday=solarToday(sunriseThen);
+    var sunsetToday=solarToday(sunsetThen);
+    if(sunsetToday>sunriseToday)
+      return nowMs<sunriseToday||nowMs>=sunsetToday;
+  }
+  // If Weather+ is disconnected for several days, retain the most recent
+  // evaluated appearance rather than force a bright Day screen at night.
   return localStorage.getItem('HA_LAST_AUTO_DARK')==='true';
 }
 function onWeatherEnvelope(data){
