@@ -2,7 +2,7 @@ name: Build and publish direct PBW
 on:
   workflow_dispatch:
   push:
-    branches: [continuous-native-conversation, fix/room-mapping-device-filter]
+    branches: [continuous-native-conversation, fix/catalog-types-background-state]
     paths:
       - 'package.json'
       - 'src/**'
@@ -69,13 +69,13 @@ jobs:
           path: direct-download/home-assistant-ai.pbw
           if-no-files-found: error
       - name: Publish directly installable PBW to GitHub Releases
-        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/fix/room-mapping-device-filter'
+        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/fix/catalog-types-background-state'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG=dev-room-mapping-device-filter
-          if [[ "$GITHUB_REF_NAME" != "fix/room-mapping-device-filter" ]]; then TAG=dev-continuous-native-conversation; fi
+          TAG=dev-catalog-types-background-state
+          if [[ "$GITHUB_REF_NAME" != "fix/catalog-types-background-state" ]]; then TAG=dev-continuous-native-conversation; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" \
               --title "Latest development PBW" --prerelease \
