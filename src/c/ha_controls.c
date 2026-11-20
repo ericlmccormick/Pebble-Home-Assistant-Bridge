@@ -704,8 +704,12 @@ void controls_open_mode(int mode){
     mode==0?"Select to control":mode==1?"Favorite devices":"Scenes and scripts");
   // All modes use one scrollable list. Room headers are not selectable.
   list_push();
-  // Browsing locally cached rooms or favorites requires ZERO phone messages.
-  catalog_request_if_due();
+  // Cached metadata makes the section visible immediately, but it does
+  // not include live states. ALWAYS request the active page on section
+  // entry: the phone compares catalog revisions and sends only CTRL_DONE
+  // (no duplicate row metadata) when nothing changed, then streams states.
+  // If the phone is offline, the cached list remains usable.
+  if(!s_sync_pending)s_sync_pending=send_command("CTRL_REQUEST",s_mode);
 }
 // Legacy entry point used by earlier code.
 void controls_open(void){controls_open_mode(0);}
