@@ -28,6 +28,8 @@ jobs:
         run: node tests/inline-rooms.test.cjs
       - name: On-watch settings and fan discovery recheck
         run: node tests/watch-settings.test.cjs
+      - name: Clay device filter and room header behavior
+        run: node tests/phone-filter.test.cjs
       - name: Static watch SDK interface validation
         run: |
           python3 - <<'PY'
