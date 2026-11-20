@@ -9,8 +9,10 @@ assert(pkg.pebble.messageKeys.includes('CTRL_DIRECTION'));
 assert(pkg.pebble.messageKeys.includes('CTRL_ADVANCED'));
 assert(c.includes('return m==s_home_menu?row_height():(s_large_text?58:38)'),
   'Compact device rows preserve readable home navigation');
-assert(c.includes('dimmed?(highlighted?ui_selected_bg():ui_bg())'),
-  'Off/unavailable badges remain outlined, not lit');
+assert(c.includes('(unknown||dimmed)?(highlighted?ui_selected_bg():ui_bg())'),
+  'Unknown/off/unavailable badges remain unfilled until live status arrives');
+assert(c.includes('GColor category=kind_color(kind)'),
+  'Device type artwork keeps a distinctive category color before state loads');
 assert(c.includes('detail_push(index,false)'));
 assert(c.includes('send_command("CTRL_INSPECT",index)'));
 assert(c.includes('window_single_click_subscribe(BUTTON_ID_UP,detail_up_click)'));
