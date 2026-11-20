@@ -465,45 +465,40 @@ function askViaBridge(text,legacy,mute){
 }
 
 var controlRows=[];
-var LAST_REV_KEY='HA_WATCH_CATALOG_REV_V2',LAST_STATES_KEY='HA_WATCH_STATES_V2';
-var WATCH_IDS_KEY='HA_WATCH_IDS_V2';
-function loadSentStates(){
-  try {var data=JSON.parse(localStorage.getItem(LAST_STATES_KEY)||'{}');
-    return data&&typeof data==='object'?data:{};}catch(e){return {};}
-}
-function normalizeCatalog(rows){
+var LAST_REV_KEY='HA_WATCH_PAGE_REV_V3';
+var WATCH_IDS_KEY='HA_WATCH_PAGE_IDS_V3';
+function normalizeCatalog(rows,mode){
   var favorites=favoriteIds(),hidden=hiddenIds();
-  return rows.filter(function(r){return r&&typeof r.id==='string'&&hidden.indexOf(r.id)<0;})
-    .sort(function(a,b){
-      var pa=favorites.indexOf(a.id)>=0?0:isFanControl(a)?1:2;
-      var pb=favorites.indexOf(b.id)>=0?0:isFanControl(b)?1:2;
-      return pa-pb||String(a.room||'').localeCompare(String(b.room||''))||
-        String(a.name||'').localeCompare(String(b.name||''))||
-        String(a.id).localeCompare(String(b.id));
-    }).slice(0,48).sort(function(a,b){
-      return String(a.room||'').localeCompare(String(b.room||''))||
-        String(a.name||'').localeCompare(String(b.name||''));
-    }).map(function(r){
-      return {id:r.id,name:r.name,room:r.room,domain:r.domain,
-        state:displayState(r),favorite:favorites.indexOf(r.id)>=0,
-        advanced:r.advanced===true};
-    });
+  return rows.filter(function(r){
+    if(!r||typeof r.id!=='string'||hidden.indexOf(r.id)>=0)return false;
+    if(mode===1)return favorites.indexOf(r.id)>=0;
+    if(mode===2)return isRunAction(r.domain);
+    return true;
+  }).sort(function(a,b){
+    return String(a.room||'').localeCompare(String(b.room||''))||
+      String(a.name||'').localeCompare(String(b.name||''))||
+      String(a.id||'').localeCompare(String(b.id||''));
+  }).map(function(r){
+    return {id:r.id,name:r.name,room:r.room,domain:r.domain,
+      favorite:favorites.indexOf(r.id)>=0};
+  });
 }
-function catalogRevision(rows){
-  // Keep dynamic states out of this hash: on/off changes send tiny deltas.
-  var text='HA-WATCH-CATALOG-V2|'+rows.map(function(r){
-    return [r.id,r.name,r.room,r.domain,r.favorite?'1':'0',r.advanced?'1':'0'].join('|');
-  }).join('\n'),hash=5381;
-  for(var i=0;i<text.length;i++)hash=((hash*33)^text.charCodeAt(i))|0;
+function catalogRevision(rows,mode,offset){
+  // Only the identity/labels/room/favorite flags of THIS watch page.
+  // Live state and advanced capabilities are never cached here.
+  var raw='HA-WATCH-PAGE-V3|'+mode+'|'+offset+'|'+rows.map(function(r){
+    return [r.id,r.name,r.room,r.domain,r.favorite?'1':'0'].join('|');
+  }).join('\\n'),hash=5381;
+  for(var i=0;i<raw.length;i++)hash=((hash*33)^raw.charCodeAt(i))|0;
   return hash||1;
 }
 function controlSend(message,next,attempt){
   attempt=attempt||0;
   Pebble.sendAppMessage(message,function(){if(next)next(true);},function(err){
-    if(attempt<2){
+    if(attempt<2)
       setTimeout(function(){controlSend(message,next,attempt+1);},220*(attempt+1));
-    }else{
-      console.log('Control transport failed after 3 tries: '+JSON.stringify(err));
+    else{
+      console.log('Control transport failed: '+JSON.stringify(err));
       if(next)next(false);
     }
   });
@@ -511,33 +506,31 @@ function controlSend(message,next,attempt){
 function controlRow(r,index){
   return {COMMAND:'CTRL_ROW',CTRL_INDEX:index,
     CTRL_NAME:String(r.name||'Device').slice(0,35),
-    CTRL_STATUS:String(r.state||'unknown').slice(0,11),
     CTRL_ROOM:String(r.room||'Unassigned').slice(0,21),
-    CTRL_KIND:controlKind(r.domain,r.name),CTRL_FAV:r.favorite?1:0,
-    CTRL_ADVANCED:r.advanced?1:0};
+    CTRL_KIND:controlKind(r.domain,r.name),CTRL_FAV:r.favorite?1:0};
 }
-function sendCatalog(watchRevision,rows){
-  controlRows=normalizeCatalog(rows);
-  var revision=catalogRevision(controlRows);
+var controlRows=[];
+function sendCatalog(watchRevision,rows,mode,offset,alwaysSend){
+  mode=mode===1||mode===2?mode:0;
+  var full=normalizeCatalog(rows,mode),total=full.length;
+  offset=Math.max(0,Math.floor(Number(offset)||0));
+  if(total&&offset>=total)offset=Math.floor((total-1)/PAGE_SIZE)*PAGE_SIZE;
+  if(!total)offset=0;
+  controlRows=full.slice(offset,offset+PAGE_SIZE);
+  currentWatchMode=mode;currentWatchOffset=offset;
+  var revision=catalogRevision(controlRows,mode,offset);
   var lastSentRev=Number(localStorage.getItem(LAST_REV_KEY)||0);
-  var sentStates=loadSentStates();
-  var full=watchRevision!==revision||lastSentRev!==revision;
-  var packets=[];
-  controlRows.forEach(function(r,i){
-    if(full)packets.push(controlRow(r,i));
-    else if(sentStates[r.id]!==r.state)
-      packets.push({COMMAND:'CTRL_STATE',CTRL_INDEX:i,CTRL_STATUS:String(r.state).slice(0,26)});
-  });
-  var nextStates={};
-  controlRows.forEach(function(r){nextStates[r.id]=r.state;});
+  var transmit=!!alwaysSend||watchRevision!==revision||lastSentRev!==revision;
+  var packets=transmit?controlRows.map(controlRow):[];
   function sendAt(i){
     if(i===packets.length){
-      controlSend({COMMAND:'CTRL_DONE',CTRL_TOTAL:controlRows.length,CTRL_REV:revision},
-        function(ok){
-          if(!ok)return;
-          localStorage.setItem(LAST_REV_KEY,String(revision));
-          localStorage.setItem(LAST_STATES_KEY,JSON.stringify(nextStates));
-          localStorage.setItem(WATCH_IDS_KEY,JSON.stringify(controlRows.map(function(r){return r.id;})));
+      controlSend({COMMAND:'CTRL_DONE',CTRL_TOTAL:controlRows.length,
+        CTRL_GRAND_TOTAL:total,CTRL_HAS_MORE:offset+controlRows.length<total?1:0,
+        CTRL_OFFSET:offset,CTRL_REV:revision},function(ok){
+          if(ok){
+            localStorage.setItem(LAST_REV_KEY,String(revision));
+            localStorage.setItem(WATCH_IDS_KEY,JSON.stringify(controlRows.map(function(r){return r.id;})));
+          }
         });
       return;
     }
@@ -550,30 +543,22 @@ function sendCatalog(watchRevision,rows){
 }
 var forceRefreshPromise=null;
 function forceRefreshControls(){
-  // Explicit force refresh is different from hourly polling:
-  // bypass the phone cache, walk every Bridge discovery page, then push
-  // a complete catalog to the watch immediately (even if unchanged).
   if(forceRefreshPromise)return forceRefreshPromise;
   localStorage.removeItem(CATALOG_FETCH_AT_KEY);
   forceRefreshPromise=fetchControlsIfStale(true).then(function(rows){
-    sendCatalog(0,rows);
+    sendCatalog(0,rows,currentWatchMode,currentWatchOffset,true);
     return rows;
   }).catch(function(err){
-    console.log('Forced control discovery failed: '+String(err&&err.message||err));
-    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:'Refresh failed: '+String(err.message||err).slice(0,11)});
+    console.log('Forced discovery: '+String(err&&err.message||err));
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:'Refresh failed'});
     throw err;
-  }).then(function(value){
-    forceRefreshPromise=null;
-    return value;
-  },function(err){
-    forceRefreshPromise=null;
-    throw err;
-  });
+  }).then(function(value){forceRefreshPromise=null;return value;},
+    function(err){forceRefreshPromise=null;throw err;});
   return forceRefreshPromise;
 }
-function controlLoad(watchRevision){
+function controlLoad(watchRevision,mode,offset){
   fetchControlsIfStale(false).then(function(rows){
-    sendCatalog(Number(watchRevision)||0,rows);
+    sendCatalog(Number(watchRevision)||0,rows,mode,offset,false);
   }).catch(function(err){
     controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
   });
@@ -612,22 +597,34 @@ function detailMeta(fresh,domain){
 }
 function syncFreshState(index,r,fresh,complete){
   if(!fresh||fresh.state===undefined)throw Error('Missing current state');
-  r.state=String(fresh.state);
-  var all=getCachedControls();
-  all.forEach(function(x){if(x.id===r.id)x.state=r.state;});
-  localStorage.setItem(CATALOG_CACHE_KEY,JSON.stringify(all));
-  var states=loadSentStates();
-  states[r.id]=r.state;
-  localStorage.setItem(LAST_STATES_KEY,JSON.stringify(states));
-  var meta=detailMeta(fresh,r.domain);
-  controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
-    CTRL_STATUS:r.state.slice(0,11)},function(ok){
+  // State and adjustable capability live only in memory for this selected
+  // device. Never put them in the phone catalog or watch persistent storage.
+  var state=String(fresh.state),meta=detailMeta(fresh,r.domain);
+  controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,CTRL_STATUS:state.slice(0,11)},function(ok){
     if(!ok)return;
     controlSend({COMMAND:'CTRL_DETAIL_STATE',CTRL_INDEX:index,
-      CTRL_STATUS:r.state.slice(0,11),CTRL_LEVEL:meta.level,
+      CTRL_STATUS:state.slice(0,11),CTRL_LEVEL:meta.level,
       CTRL_ADJUSTABLE:meta.adjustable?1:0},function(ok2){
       if(ok2&&complete)controlSend({COMMAND:'CTRL_ACTION_DONE',CTRL_STATUS:'Updated'});
     });
+  });
+}
+function controlInspect(index){
+  var item=controlAt(index);
+  if(!item)return;
+  if(isRunAction(item.row.domain)){controlAct(index);return;}
+  // One get_state only on interaction, not N lookups per device/room page.
+  pluginAction('get_state',{entity_id:item.id}).then(function(result){
+    var fresh=pluginJson(result),meta=detailMeta(fresh,item.row.domain);
+    if(meta.adjustable){
+      controlSend({COMMAND:'CTRL_DETAIL_OPEN',CTRL_INDEX:index},function(ok){
+        if(ok)syncFreshState(index,item.row,fresh,false);
+      });
+    }else{
+      controlAct(index);
+    }
+  }).catch(function(err){
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
   });
 }
 function controlDetails(index){
@@ -690,7 +687,11 @@ function controlAct(index){
 Pebble.addEventListener('appmessage',function(event){
   var d=event.payload||{};
   if(audio.handleMessage(d))return;
-  if(d.COMMAND==='CTRL_REQUEST'){controlLoad(Number(d.CTRL_REV)||0);return;}
+  if(d.COMMAND==='CTRL_REQUEST'){
+    controlLoad(Number(d.CTRL_REV)||0,Number(d.CTRL_INDEX)||0,Number(d.CTRL_OFFSET)||0);
+    return;
+  }
+  if(d.COMMAND==='CTRL_INSPECT'){controlInspect(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND==='CTRL_FORCE_REFRESH'){
     forceRefreshControls().catch(function(){});return;
   }
