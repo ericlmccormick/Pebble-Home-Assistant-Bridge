@@ -250,6 +250,44 @@ function displayState(row){
   // A scene/script activation is an action, not an entity being switched on.
   return isRunAction(row.domain)?'Run':String(row.state||'unknown');
 }
+// Render state/capability details without changing the raw HA state used by icons.
+function deviceStatusSubtitle(row,fresh){
+  if(isRunAction(row.domain))return 'Tap to run';
+  var raw=String(fresh&&fresh.state!==undefined?fresh.state:'unknown');
+  var key=raw.toLowerCase();
+  var labels={on:'On',off:'Off',open:'Open',closed:'Closed',opening:'Opening',
+    closing:'Closing',locked:'Locked',unlocked:'Unlocked',
+    unknown:'Unknown',unavailable:'Unavailable'};
+  var label=Object.prototype.hasOwnProperty.call(labels,key)?labels[key]:
+    raw.charAt(0).toUpperCase()+raw.slice(1);
+  if(key==='unknown'||key==='unavailable')return label;
+  var a=fresh&&fresh.attributes||{},domain=row.domain;
+  var parts=[label],percentage=null;
+  function percent(value){return Math.max(0,Math.min(100,Math.round(value)));}
+  if(key!=='off'&&domain==='light'&&typeof a.brightness==='number')
+    percentage=percent(a.brightness*100/255);
+  else if(key!=='off'&&domain==='fan'&&typeof a.percentage==='number')
+    percentage=percent(a.percentage);
+  else if(domain==='cover'&&typeof a.current_position==='number')
+    percentage=percent(a.current_position);
+  if(percentage!==null)parts.push(percentage+'%');
+  if(domain==='light'&&key==='on'){
+    var color='';
+    if(typeof a.color_name==='string'&&a.color_name.trim())
+      color=a.color_name.trim();
+    else if(Array.isArray(a.rgb_color)&&a.rgb_color.length===3&&
+      a.rgb_color.every(function(v){return typeof v==='number'&&isFinite(v);}))
+      color='#'+a.rgb_color.map(function(v){
+        return ('0'+Math.max(0,Math.min(255,Math.round(v))).toString(16)).slice(-2);
+      }).join('').toUpperCase();
+    else if(typeof a.color_temp_kelvin==='number'&&a.color_temp_kelvin>0)
+      color=Math.round(a.color_temp_kelvin)+'K';
+    else if(typeof a.color_temp==='number'&&a.color_temp>0)
+      color=Math.round(1000000/a.color_temp)+'K';
+    if(color)parts.push(color);
+  }
+  return parts.join(' · ').slice(0,39);
+}
 // The room header already supplies location. HA sometimes gives a fan and
 // light the identical friendly_name (e.g. both "Annie Cave"). Use the entity
 // domain to disambiguate instead of editing their Home Assistant entity IDs.
@@ -615,6 +653,7 @@ function controlRow(r,index){
 }
 var controlRows=[];
 var statePageGeneration=0;
+var currentPageRevision=0;
 var STATE_FETCH_CONCURRENCY=6;
 // Short-lived phone RAM cache. Never persisted to localStorage or the watch.
 // The same six-slot scheduler is shared by startup prefetch and page views.
@@ -703,7 +742,8 @@ function refreshPageStates(page,revision,generation){
       if(generation!==statePageGeneration)return;
       if(fresh&&fresh.state!==undefined){
         sendQueue.push({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
-          CTRL_REV:revision,CTRL_STATUS:String(fresh.state).slice(0,11)});
+          CTRL_REV:revision,CTRL_STATUS:String(fresh.state).slice(0,11),
+          CTRL_SUBTITLE:deviceStatusSubtitle(row,fresh)});
         drain();
       }
     }).catch(function(err){
@@ -726,6 +766,7 @@ function sendCatalog(watchRevision,rows,mode,offset,alwaysSend){
   var generation=++statePageGeneration;
   var pageSnapshot=controlRows.slice();
   var revision=catalogRevision(pageSnapshot,mode,offset);
+  currentPageRevision=revision;
   var lastSentRev=Number(localStorage.getItem(LAST_REV_KEY)||0);
   var transmit=!!alwaysSend||watchRevision!==revision||lastSentRev!==revision;
   var packets=transmit?pageSnapshot.map(controlRow):[];
@@ -808,10 +849,12 @@ function syncFreshState(index,r,fresh,complete){
   // State and adjustable capability live only in memory for this selected
   // device. Never put them in the phone catalog or watch persistent storage.
   var state=String(fresh.state),meta=detailMeta(fresh,r.domain);
-  controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,CTRL_STATUS:state.slice(0,11)},function(ok){
+  var subtitle=deviceStatusSubtitle(r,fresh);
+  controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,CTRL_REV:currentPageRevision,
+    CTRL_STATUS:state.slice(0,11),CTRL_SUBTITLE:subtitle},function(ok){
     if(!ok)return;
     controlSend({COMMAND:'CTRL_DETAIL_STATE',CTRL_INDEX:index,
-      CTRL_STATUS:state.slice(0,11),CTRL_LEVEL:meta.level,
+      CTRL_STATUS:state.slice(0,11),CTRL_SUBTITLE:subtitle,CTRL_LEVEL:meta.level,
       CTRL_ADJUSTABLE:meta.adjustable?1:0},function(ok2){
       if(ok2&&complete)controlSend({COMMAND:'CTRL_ACTION_DONE',CTRL_STATUS:'Updated'});
     });

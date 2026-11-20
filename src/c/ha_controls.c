@@ -12,6 +12,7 @@
 #define NAME_LEN 36
 #define ROOM_LEN 22
 #define STATE_LEN 12
+#define SUBTITLE_LEN 40
 #define CACHE_ROWS_PER_KEY 3
 #define CACHE_COUNT_KEY 3800
 #define CACHE_REV_KEY 3801
@@ -34,6 +35,7 @@ typedef struct {
   uint8_t kind;
   bool favorite;
   char state[STATE_LEN]; // RAM only, never persisted
+  char subtitle[SUBTITLE_LEN]; // RAM only, never persisted
   bool advanced;        // RAM only, never persisted
 } ControlRow;
 typedef char cache_row_chunk_fits_persist_value[
@@ -331,18 +333,22 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   ControlRow *r=&s_rows[catalog_index];
   int x=PBL_IF_ROUND_ELSE(35,8);
   paint_badge(ctx,GPoint(x+13,b.size.h/2),r->kind,active,r->state);
-  // One line per device (two only in the large-accessibility-text mode).
-  // State is carried by the badge, not by a wasteful subtitle row.
+  // Name high, state below: reserve separate lines at both font sizes.
+  // Keep the canonical state in r->state for icon fill and secure controls.
   int left=x+34;
   int right=r->favorite?PBL_IF_ROUND_ELSE(34,21):PBL_IF_ROUND_ELSE(15,7);
-  int h=s_large_text?50:26;
+  int width=b.size.w-left-right;
   graphics_context_set_text_color(ctx,cell_fg(active));
-  GRect slot=GRect(left,0,b.size.w-left-right,b.size.h);
-  GRect label_box=s_large_text?aligned_row_text(r->name,title_font(),slot,true):
-    GRect(left,(b.size.h-h)/2,b.size.w-left-right,h);
-  graphics_draw_text(ctx,r->name,title_font(),label_box,
-    s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,
-    GTextAlignmentLeft,NULL);
+  graphics_draw_text(ctx,r->name,title_font(),
+    GRect(left,s_large_text?2:1,width,s_large_text?34:26),
+    GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+  // Metadata is available before live status; never claim it is current.
+  const char *subtitle=r->subtitle[0]?r->subtitle:
+    ((r->kind==5||r->kind==6||r->kind==7)?"Tap to run":"Reading...");
+  graphics_context_set_text_color(ctx,cell_sub(active));
+  graphics_draw_text(ctx,subtitle,sub_font(),
+    GRect(left,s_large_text?37:25,width,s_large_text?27:23),
+    GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   if(r->favorite){
     graphics_context_set_text_color(ctx,cell_sub(active));
     graphics_draw_text(ctx,"*",fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
@@ -474,7 +480,7 @@ static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){
 
 static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){
   // Home screen retains two-line descriptions; device menu rows are compact.
-  return m==s_home_menu?row_height():(s_large_text?58:38);
+  return m==s_home_menu?row_height():(s_large_text?68:50);
 }
 
 static void detail_draw(Layer *layer,GContext *ctx){
@@ -950,10 +956,13 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     if(!i||!st)return;
     int index=i->value->int32;
     if(index<0||index>=s_count)return;
-    if(strcmp(s_rows[index].state,st->value->cstring)!=0){
-      snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
-      if(s_menu)menu_layer_reload_data(s_menu);
-    }
+    Tuple *sub=dict_find(iter,MESSAGE_KEY_CTRL_SUBTITLE);
+    const char *display=sub?sub->value->cstring:st->value->cstring;
+    bool changed=strcmp(s_rows[index].state,st->value->cstring)!=0||
+      strcmp(s_rows[index].subtitle,display)!=0;
+    snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
+    snprintf(s_rows[index].subtitle,sizeof(s_rows[index].subtitle),"%s",display);
+    if(changed&&s_menu)menu_layer_reload_data(s_menu);
     if(index==s_detail_index){
       s_rows[index].advanced=adj&&adj->value->int32!=0;
       s_detail_level=level?level->value->int32:-1;
@@ -999,7 +1008,10 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     if(!i||!st||!rev||rev->value->int32!=s_catalog_revision)return;
     int index=i->value->int32;
     if(index<0||index>=s_count)return;
+    Tuple *sub=dict_find(iter,MESSAGE_KEY_CTRL_SUBTITLE);
     snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
+    snprintf(s_rows[index].subtitle,sizeof(s_rows[index].subtitle),"%s",
+      sub?sub->value->cstring:st->value->cstring);
     // No persistence: a live state may already be stale at the next launch.
     if(s_menu)menu_layer_reload_data(s_menu);
     return;

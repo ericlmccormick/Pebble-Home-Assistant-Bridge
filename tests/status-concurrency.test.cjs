@@ -39,6 +39,8 @@ const tick=async()=>{for(let i=0;i<18;i++)await new Promise(r=>setImmediate(r));
  await tick();
  assert.strictEqual(acks.length,1,'Only one Bluetooth status is unacknowledged');
  assert.strictEqual(active,6,'Workers refill as responses arrive');
+ assert(messages.some(x=>x.COMMAND==='CTRL_STATE'&&x.CTRL_SUBTITLE==='On'),
+   'Background refresh reports readable state');
  acks.shift()();await tick();
  assert.strictEqual(acks.length,1,'ACK releases next queued update');
  const oldRev=messages.find(x=>x.COMMAND==='CTRL_DONE').CTRL_REV;

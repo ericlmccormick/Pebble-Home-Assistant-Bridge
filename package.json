@@ -40,7 +40,8 @@
       "THEME_SOLAR_SYNC_AT",
       "CTRL_OFFSET",
       "CTRL_GRAND_TOTAL",
-      "CTRL_HAS_MORE"
+      "CTRL_HAS_MORE",
+      "CTRL_SUBTITLE"
     ],
     "projectType": "native",
     "resources": {
@@ -121,6 +122,6 @@
       }
     ]
   },
-  "version": "1.7.1",
-  "description": "Home Assistant Control Center with aligned large fonts, garage doors and front door locks requiring confirmation"
+  "version": "1.7.2",
+  "description": "Home Assistant Control Center with live state, brightness and color subtitles in Normal and Large modes"
 }

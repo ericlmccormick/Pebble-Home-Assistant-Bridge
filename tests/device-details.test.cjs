@@ -7,8 +7,14 @@ assert(pkg.pebble.messageKeys.includes('CTRL_LEVEL'));
 assert(pkg.pebble.messageKeys.includes('CTRL_ADJUSTABLE'));
 assert(pkg.pebble.messageKeys.includes('CTRL_DIRECTION'));
 assert(pkg.pebble.messageKeys.includes('CTRL_ADVANCED'));
-assert(c.includes('return m==s_home_menu?row_height():(s_large_text?58:38)'),
-  'Compact device rows preserve readable home navigation');
+assert(c.includes('return m==s_home_menu?row_height():(s_large_text?68:50)'),
+  'Normal and Large rows leave room for two text lines');
+assert(c.includes('GRect(left,s_large_text?2:1,width,s_large_text?34:26)'),
+  'Device names move back above the middle of the icon');
+assert(c.includes('GRect(left,s_large_text?37:25,width,s_large_text?27:23)'),
+  'Subtitle stays directly below device name in either theme');
+assert(pkg.pebble.messageKeys.includes('CTRL_SUBTITLE'),
+  'Subtitle uses a new message key distinct from raw state');
 assert(c.includes('(unknown||dimmed)?(highlighted?ui_selected_bg():ui_bg())'),
   'Unknown/off/unavailable badges remain unfilled until live status arrives');
 assert(c.includes('GColor category=kind_color(kind)'),
@@ -24,7 +30,7 @@ assert(js.includes("if(meta.adjustable||item.row.domain==='lock'||item.row.domai
   'Simple entities toggle after live inspection; adjustable devices open details');
 const state={
   'light.bed':{entity_id:'light.bed',state:'on',
-    attributes:{brightness:128,supported_color_modes:['brightness']}},
+    attributes:{brightness:128,rgb_color:[255,20,40],supported_color_modes:['brightness']}},
   'fan.office':{entity_id:'fan.office',state:'on',
     attributes:{percentage:40,percentage_step:20,supported_features:1}},
   'switch.desk':{entity_id:'switch.desk',state:'off',attributes:{}}
@@ -76,12 +82,22 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(ok=>setImmediate(o
   fire('CTRL_DETAILS',0);await flush();
   assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_ADJUSTABLE===1&&
     x.CTRL_LEVEL===50),'Dimmable light reports 50%');
+  assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&
+    x.CTRL_SUBTITLE==='On · 50% · #FF1428'),
+    'Dimmable light reports status, percentage and color');
+  assert(sent.some(x=>x.COMMAND==='CTRL_STATE'&&
+    x.CTRL_SUBTITLE==='On · 50% · #FF1428'),
+    'List receives the same subtitle as the details');
+  assert(sent.some(x=>x.COMMAND==='CTRL_STATE'&&Number.isFinite(x.CTRL_REV)),
+    'Action states carry a revision to prevent stale-page updates');
   fire('CTRL_ADJUST',0,1);await flush();
   assert(calls.some(x=>x.action==='call_service'&&x.args.domain==='light'&&
     x.args.service==='turn_on'&&x.args.data.brightness_pct===60),
     'UP raises dimmer by 10%');
   fire('CTRL_DETAILS',1);await flush();
   assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_LEVEL===40));
+  assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_SUBTITLE==='On · 40%'),
+    'Fan status includes speed percentage');
   fire('CTRL_ADJUST',1,-1);await flush();
   assert(calls.some(x=>x.action==='call_service'&&x.args.domain==='fan'&&
     x.args.service==='set_percentage'&&x.args.data.percentage===20),
@@ -89,6 +105,8 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(ok=>setImmediate(o
   fire('CTRL_DETAILS',2);await flush();
   assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_ADJUSTABLE===0),
     'Non-dimmable switch has no level');
+  assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_SUBTITLE==='Off'),
+    'Binary switch shows Off');
   fire('CTRL_ACT',2);await flush();
   assert(calls.some(x=>x.action==='control_entity'&&x.args.entity_id==='switch.desk'),
     'Switch still toggles');
