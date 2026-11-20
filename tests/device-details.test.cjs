@@ -6,6 +6,7 @@ const pkg=require('../package.json');
 assert(pkg.pebble.messageKeys.includes('CTRL_LEVEL'));
 assert(pkg.pebble.messageKeys.includes('CTRL_ADJUSTABLE'));
 assert(pkg.pebble.messageKeys.includes('CTRL_DIRECTION'));
+assert(pkg.pebble.messageKeys.includes('CTRL_ADVANCED'));
 assert(c.includes('return m==s_home_menu?row_height():(s_large_text?58:38)'),
   'Compact device rows preserve readable home navigation');
 assert(c.includes('dimmed?(highlighted?ui_selected_bg():ui_bg())'),
@@ -14,8 +15,10 @@ assert(c.includes('detail_push(catalog_index)'));
 assert(c.includes('window_single_click_subscribe(BUTTON_ID_UP,detail_up_click)'));
 assert(c.includes('window_single_click_subscribe(BUTTON_ID_DOWN,detail_down_click)'));
 assert(c.includes('static void detail_click_config(void *context)'));
-assert(c.includes('if(kind!=5&&kind!=6&&kind!=7)'),
-  'Scenes and scripts remain quick actions');
+assert(c.includes('if(s_rows[catalog_index].advanced){detail_push(catalog_index);return;}'),
+  'Only actual dimmers or adjustable fans and lights open a detail page');
+assert(c.includes('send_command("CTRL_ACT",catalog_index)'),
+  'Simple on/off lights, fans and switches toggle from the device list');
 const state={
   'light.bed':{entity_id:'light.bed',state:'on',
     attributes:{brightness:128,supported_color_modes:['brightness']}},
