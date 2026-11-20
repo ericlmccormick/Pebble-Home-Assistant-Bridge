@@ -52,8 +52,12 @@ assert(sectionCount.includes('s_visible_count?s_visible_count:1'),
   'Empty catalogs still show placeholder and favorites/scenes remain flat');
 assert(!c.includes('s_room_window')&&!c.includes('s_room_menu'),
   'Dead room navigation windows removed');
-assert(c.includes('catalog_restore();')&&c.includes('catalog_request_if_due();'),
-  'Cached room navigation continues without automatic Bluetooth on every visit');
+assert(browse.includes('catalog_restore();')&&
+  browse.includes('if(!s_sync_pending)s_sync_pending=send_command("CTRL_REQUEST",s_mode);'),
+  'Every section entry requests live state even if catalog metadata is cached');
+assert(browse.indexOf('list_push();')<
+  browse.indexOf('send_command("CTRL_REQUEST",s_mode)'),
+  'Cached list renders before the network request');
 assert(pkjs.includes("String(a.room||'').localeCompare(String(b.room||''))"),
   'Phone catalog is pre-sorted so room groups are contiguous');
 assert(pkjs.includes('hidden.indexOf(r.id)>=0'),
