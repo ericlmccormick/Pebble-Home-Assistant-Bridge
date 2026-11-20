@@ -7,8 +7,8 @@ const src=(a,b)=>{const i=c.indexOf(a),j=c.indexOf(b,i+a.length);assert(i>=0&&j>
 assert(c.includes('static int row_height(void){return s_large_text?62:46;}'),
  'Large text home rows are 62 px, not former 80 px');
 const draw=src('static void home_draw(','static uint16_t home_rows(');
-assert(draw.includes('int title_y=s_large_text?(b.size.h-title_h)/2-2:home_title_top();'),
- 'Title is centered vertically with icon and two-line label allowance');
+assert(draw.includes('GRect home_label=s_large_text?aligned_row_text('),
+ 'Title uses measured font content to align with the center of the icon');
 const click=src('static void home_select(','static void home_up_click(');
 assert(click.includes('case 0:window_stack_pop(false);controls_start_voice();break;'),
  'Voice Assistant skips the animated idle screen');
