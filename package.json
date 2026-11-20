@@ -121,6 +121,6 @@
       }
     ]
   },
-  "version": "1.6.9",
-  "description": "Home Assistant Control Center with first-frame theme restoration and cached sunrise/sunset"
+  "version": "1.7.0",
+  "description": "Home Assistant Control Center with compact large-mode rows, direct voice launch, and visible room headers"
 }
