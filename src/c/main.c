@@ -59,7 +59,13 @@ static int s_pinwheel_angle = 0;
 static DictationSession *s_dictation_session;
 static bool s_auto_send = true;
 static bool s_large_text = false;
+// Persisted presentation state is restored before either window is created.
+// These keys are separate from the existing volume key 100 and catalog keys.
+#define PERSIST_KEY_THEME_DARK 101
+#define PERSIST_KEY_THEME_MODE 102
+#define PERSIST_KEY_LARGE_TEXT 103
 static bool s_theme_dark = false;
+static int s_theme_mode=2;
 static int s_haptic_level = 2; // 0 off, 1 low, 2 medium, 3 high
 static TextLayer *s_thinking_transcript_layer;
 static char s_thinking_transcript[256];   
@@ -438,9 +444,20 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       Tuple *large_tuple = dict_find(iterator, MESSAGE_KEY_LARGE_TEXT);
       Tuple *theme_tuple = dict_find(iterator, MESSAGE_KEY_THEME_DARK);
       Tuple *theme_mode_tuple = dict_find(iterator, MESSAGE_KEY_THEME_MODE_CODE);
-      if(theme_mode_tuple)controls_set_theme_mode(theme_mode_tuple->value->int32);
-      if(large_tuple)s_large_text=large_tuple->value->int32!=0;
-      if(theme_tuple)s_theme_dark=theme_tuple->value->int32!=0;
+      if(theme_mode_tuple){
+        s_theme_mode=theme_mode_tuple->value->int32;
+        if(s_theme_mode<0||s_theme_mode>2)s_theme_mode=2;
+        controls_set_theme_mode(s_theme_mode);
+        persist_write_int(PERSIST_KEY_THEME_MODE,s_theme_mode);
+      }
+      if(large_tuple){
+        s_large_text=large_tuple->value->int32!=0;
+        persist_write_int(PERSIST_KEY_LARGE_TEXT,s_large_text?1:0);
+      }
+      if(theme_tuple){
+        s_theme_dark=theme_tuple->value->int32!=0;
+        persist_write_int(PERSIST_KEY_THEME_DARK,s_theme_dark?1:0);
+      }
       controls_apply_settings(s_large_text,s_theme_dark);
       if(s_main_window)window_set_background_color(s_main_window,s_theme_dark?GColorBlack:GColorWhite);
       if(s_text_layer){
@@ -764,6 +781,19 @@ static void main_window_unload(Window *window) {
 // =========================================================================
 
 static void init() {
+  // Restore last effective appearance synchronously before the initial
+  // window_stack_push. Auto mode will be refined by a newer phone solar
+  // calculation later, without an initial incorrect Day-theme frame.
+  if(persist_exists(PERSIST_KEY_THEME_DARK))
+    s_theme_dark=persist_read_int(PERSIST_KEY_THEME_DARK)!=0;
+  if(persist_exists(PERSIST_KEY_THEME_MODE)){
+    int mode=persist_read_int(PERSIST_KEY_THEME_MODE);
+    if(mode>=0&&mode<=2)s_theme_mode=mode;
+  }
+  if(persist_exists(PERSIST_KEY_LARGE_TEXT))
+    s_large_text=persist_read_int(PERSIST_KEY_LARGE_TEXT)!=0;
+  controls_set_theme_mode(s_theme_mode);
+  controls_apply_settings(s_large_text,s_theme_dark);
   ha_audio_init();
   #ifdef PBL_SPEAKER
     if (persist_exists(PERSIST_KEY_VOLUME)) s_volume = persist_read_int(PERSIST_KEY_VOLUME) / 100.0f;
