@@ -80,7 +80,8 @@
       "DEV_47[2]",
       "CTRL_LEVEL",
       "CTRL_ADJUSTABLE",
-      "CTRL_DIRECTION"
+      "CTRL_DIRECTION",
+      "CTRL_ADVANCED"
     ],
     "projectType": "native",
     "resources": {
@@ -161,6 +162,6 @@
       }
     ]
   },
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Home Assistant Control Center with Google Home-style inline room headers and direct device access"
 }
