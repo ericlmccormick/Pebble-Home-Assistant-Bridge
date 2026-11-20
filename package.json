@@ -122,6 +122,6 @@
       }
     ]
   },
-  "version": "1.7.2",
-  "description": "Home Assistant Control Center with correct large text baselines and reliable per-device status updates"
+  "version": "1.7.3",
+  "description": "Home Assistant Control Center with automatic live status refresh whenever cached device sections open"
 }
