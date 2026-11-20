@@ -57,13 +57,11 @@ function node(){
   const section=clay.config.filter(x=>x.type==='section')[2];
   const deviceConfigs=section.items.filter(x=>x.type==='checkboxgroup');
   assert.strictEqual(deviceConfigs.length,devices.length);
-  const rooms=section.items.filter(x=>x.type==='heading'&&x.id&&x.id.startsWith('WATCH_ROOM_'));
+  const rooms=section.items.filter(x=>x.type==='heading'&&x.defaultValue!=='Watch devices');
   const records=Object.fromEntries(deviceConfigs.map(x=>[x.label,node()]));
   const headings=Object.fromEntries(rooms.map(x=>[x.defaultValue,node()]));
   const deviceItems={};
   deviceConfigs.forEach(x=>deviceItems[x.messageKey]={$element:[records[x.label]]});
-  const headerItems={};
-  rooms.forEach(x=>headerItems[x.id]={$element:[headings[x.defaultValue]]});
   const callbacks={};
   const changes=[];
   const switchInput={
@@ -78,7 +76,7 @@ function node(){
         assert.strictEqual(sel,'input[type="checkbox"]');
         return switchInput;
       }}]}:deviceItems[key],
-    getItemById:id=>headerItems[id]
+    getItemById:()=>{throw Error('Room headers must not be mutated');}
   };
   clay.customFn.call(page);
   assert.strictEqual(typeof callbacks.AFTER_BUILD,'function');
@@ -91,13 +89,13 @@ function node(){
   assert(!hidden('Bedroom fan'));
   assert(!hidden('Guest room'),'Fan whose entity ID ends in _fan remains visible');
   assert(!hidden('Attic control'),'Fan-like input_boolean is visible');
-  assert(hidden('Desk outlet'),'Unrelated switch hidden by default');
+  assert(!hidden('Desk outlet'),'Ordinary switches included by default');
   assert(hidden('Movie mode'),'Scene hidden by default');
-  assert(hidden('Fanatic device'),'Substring fanatic must not be classified as fan');
+  assert(!hidden('Fanatic device'),'All ordinary switches included by default');
   for(const room of ['Kitchen','Bedroom','Guest','Attic'])
     assert(!roomHidden(room),'Visible room header remains: '+room);
   for(const room of ['Office','Cinema','Other'])
-    assert(roomHidden(room),'Other-only room header hidden: '+room);
+    assert(!roomHidden(room),'Room header remains present even with only hidden types: '+room);
 
   switchInput.checked=true;changes[0]();
   for(const config of deviceConfigs)
@@ -108,14 +106,16 @@ function node(){
   switchInput.checked=false;changes[0]();
   assert(!hidden('Bedroom fan')&&!hidden('Guest room'),
     'Turning Show All off again cannot hide any fan');
-  assert(hidden('Desk outlet')&&hidden('Movie mode'));
+  assert(!hidden('Desk outlet')&&hidden('Movie mode'));
   assert(!roomHidden('Bedroom')&&!roomHidden('Guest'));
-  assert(roomHidden('Office')&&roomHidden('Cinema'));
+  assert(!roomHidden('Office')&&!roomHidden('Cinema'));
+  assert.strictEqual(rooms.length,7,'Every room header remains in the filtered view');
 
   assert(js.includes('.component-checkbox.ha-device-filter-hidden{display:none!important;}'),
     'Hidden class must override layout display:flex!important');
-  assert(js.includes('.component-heading.ha-room-filter-hidden{display:none!important;}'));
+  assert(!js.includes('ha-room-filter-hidden'),
+    'Room headings must not be hidden by display-only filtering');
   assert(!storage.HA_HIDDEN_V1&&!storage.HA_FAVORITES_V1,
     'Visual filter must not modify hide/favorite selections');
-  console.log('Phone settings filter: Off/On/Off, fan ID matching, all device rows, room headers and no preference mutation passed');
+  console.log('Phone settings filter: Off/On/Off, lights/fans/switches, persistent room headers and no preference mutation passed');
 })().catch(e=>{console.error(e);process.exit(1);});
