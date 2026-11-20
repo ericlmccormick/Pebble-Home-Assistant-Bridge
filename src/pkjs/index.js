@@ -586,6 +586,68 @@ function controlRow(r,index){
 var controlRows=[];
 var statePageGeneration=0;
 var STATE_FETCH_CONCURRENCY=6;
+// Short-lived phone RAM cache. Never persisted to localStorage or the watch.
+// The same six-slot scheduler is shared by startup prefetch and page views.
+var STATE_PRELOAD_TTL_MS=60*1000;
+var statePreload={},statePending={},stateJobs=[],stateActive=0;
+var statePreloadEpoch=0;
+function stateQueuePump(){
+  while(stateActive<STATE_FETCH_CONCURRENCY&&stateJobs.length){
+    var job=stateJobs.shift();
+    stateActive++;
+    (function(job){
+      pluginAction('get_state',{entity_id:job.id}).then(function(result){
+        var fresh=pluginJson(result);
+        if(fresh&&fresh.state!==undefined){
+          statePreload[job.id]={value:fresh,at:Date.now()};
+        }
+        job.resolve(fresh);
+      }).catch(function(err){
+        job.reject(err);
+      }).then(function(){
+        stateActive--;
+        delete statePending[job.id];
+        stateQueuePump();
+      });
+    })(job);
+  }
+}
+function readStateOnPhone(id){
+  var now=Date.now(),cached=statePreload[id];
+  if(cached&&now-cached.at>=0&&now-cached.at<STATE_PRELOAD_TTL_MS)
+    return Promise.resolve(cached.value);
+  if(statePending[id])return statePending[id];
+  statePending[id]=new Promise(function(resolve,reject){
+    stateJobs.push({id:id,resolve:resolve,reject:reject});
+  });
+  stateQueuePump();
+  return statePending[id];
+}
+function prefetchOnOpen(){
+  var epoch=++statePreloadEpoch;
+  return fetchControlsIfStale(false).then(function(rows){
+    if(epoch!==statePreloadEpoch)return;
+    // Favor favorites plus the first 32 room-sorted controls. The remaining
+    // pages load on demand; opening the app never floods the entire home.
+    var home=normalizeCatalog(rows,0);
+    var favored=normalizeCatalog(rows,1);
+    var selected={},queue=[];
+    favored.concat(home.slice(0,PAGE_SIZE)).forEach(function(row){
+      if(isRunAction(row.domain)||selected[row.id])return;
+      selected[row.id]=true;queue.push(row);
+    });
+    // No Pebble.sendAppMessage from prefetch: Bluetooth stays idle until
+    // the user actually opens Favorites or Devices by Room.
+    return Promise.all(queue.map(function(r){
+      return readStateOnPhone(r.id).catch(function(err){
+        console.log('State prefetch '+r.id+': '+String(err&&err.message||err));
+      });
+    }));
+  }).catch(function(err){
+    console.log('Startup prefetch unavailable: '+String(err&&err.message||err));
+  });
+}
+
 function refreshPageStates(page,revision,generation){
   // Load current-page statuses in parallel; metadata and type icons are
   // already visible. BLE AppMessages are still sent ONE at a time, waiting
@@ -607,9 +669,8 @@ function refreshPageStates(page,revision,generation){
     if(index>=page.length)return Promise.resolve();
     var row=page[index];
     if(isRunAction(row.domain))return worker();
-    return pluginAction('get_state',{entity_id:row.id}).then(function(result){
+    return readStateOnPhone(row.id).then(function(fresh){
       if(generation!==statePageGeneration)return;
-      var fresh=pluginJson(result);
       if(fresh&&fresh.state!==undefined){
         sendQueue.push({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
           CTRL_REV:revision,CTRL_STATUS:String(fresh.state).slice(0,11)});
@@ -804,6 +865,9 @@ function controlAct(index){
 Pebble.addEventListener('appmessage',function(event){
   var d=event.payload||{};
   if(audio.handleMessage(d))return;
+  if(d.COMMAND==='CTRL_PREFETCH'){
+    prefetchOnOpen();return;
+  }
   if(d.COMMAND==='CTRL_REQUEST'){
     controlLoad(Number(d.CTRL_REV)||0,Number(d.CTRL_INDEX)||0,Number(d.CTRL_OFFSET)||0);
     return;
