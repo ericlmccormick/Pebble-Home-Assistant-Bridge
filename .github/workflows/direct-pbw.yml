@@ -2,7 +2,7 @@ name: Build and publish direct PBW
 on:
   workflow_dispatch:
   push:
-    branches: [continuous-native-conversation, feature/unlimited-device-catalog]
+    branches: [continuous-native-conversation, fix/phone-device-filter-room-headings]
     paths:
       - 'package.json'
       - 'src/**'
@@ -40,6 +40,7 @@ jobs:
           node tests/sentence-prefetch.test.cjs
           node tests/theme-contrast.test.cjs
           node tests/control-cache.test.cjs
+          node tests/phone-filter.test.cjs
           node tests/inline-rooms.test.cjs
           node tests/watch-settings.test.cjs
           node tests/device-details.test.cjs
@@ -68,13 +69,13 @@ jobs:
           path: direct-download/home-assistant-ai.pbw
           if-no-files-found: error
       - name: Publish directly installable PBW to GitHub Releases
-        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/feature/unlimited-device-catalog'
+        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/fix/phone-device-filter-room-headings'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG=dev-unlimited-device-catalog
-          if [[ "$GITHUB_REF_NAME" != "feature/unlimited-device-catalog" ]]; then TAG=dev-continuous-native-conversation; fi
+          TAG=dev-phone-device-filter-room-headings
+          if [[ "$GITHUB_REF_NAME" != "fix/phone-device-filter-room-headings" ]]; then TAG=dev-continuous-native-conversation; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" \
               --title "Latest development PBW" --prerelease \
