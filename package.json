@@ -118,6 +118,6 @@
       }
     ]
   },
-  "version": "1.6.3",
-  "description": "Home Assistant Control Center with Lights, Fans and Switches filter and always-visible room headings"
+  "version": "1.6.4",
+  "description": "Home Assistant Control Center with all-device settings, deduplicated catalog, device type icons and progressive background status"
 }
