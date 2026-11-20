@@ -118,6 +118,6 @@
       }
     ]
   },
-  "version": "1.6.5",
-  "description": "Home Assistant Control Center with contextual, room-relative names that distinguish same-named light and fan devices"
+  "version": "1.6.6",
+  "description": "Home Assistant Control Center with mirrored-device grouping, correct light/fan differentiation, and synchronized favorite/hide settings"
 }
