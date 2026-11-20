@@ -232,17 +232,27 @@ function displayState(row){
   return isRunAction(row.domain)?'Run':String(row.state||'unknown');
 }
 function deduplicateControls(rows){
-  var favorites=favoriteIds(),picked={},order=[];
+  var favorites=favoriteIds(),byId={},keys=[];
   (rows||[]).forEach(function(r){
     if(!r||!r.id)return;
     var id=String(r.id).toLowerCase();
-    // ID is the canonical identity. A repeated friendly name belonging to
-    // another domain remains an independent device.
-    var key=id;
-    if(!picked[key]){picked[key]=r;order.push(key);}
-    else if(favorites.indexOf(r.id)>=0)picked[key]=r;
+    if(!byId[id]){byId[id]=r;keys.push(id);}
+    else if(favorites.indexOf(r.id)>=0)byId[id]=r;
   });
-  return order.map(function(key){return picked[key];});
+  // Mirrored HA entities sometimes have different IDs but exactly the same
+  // label, room and domain. Display one representative; keep independently
+  // named entities (and different domains) separate.
+  var byLabel={},order=[];
+  keys.forEach(function(id){
+    var r=byId[id];
+    var label=String(r.room||'Unassigned').toLowerCase().trim()+'|'+
+      String(r.name||r.id).toLowerCase().trim()+'|'+
+      String(r.domain||'').toLowerCase();
+    if(!byLabel[label]){byLabel[label]=r;order.push(label);}
+    else if(favorites.indexOf(r.id)>=0&&favorites.indexOf(byLabel[label].id)<0)
+      byLabel[label]=r;
+  });
+  return order.map(function(k){return byLabel[k];});
 }
 function configureWithDevices(rows){
   var cfg=clayConfig.slice();
@@ -478,7 +488,7 @@ var LAST_REV_KEY='HA_WATCH_PAGE_REV_V3';
 var WATCH_IDS_KEY='HA_WATCH_PAGE_IDS_V3';
 function normalizeCatalog(rows,mode){
   var favorites=favoriteIds(),hidden=hiddenIds();
-  return rows.filter(function(r){
+  return deduplicateControls(rows).filter(function(r){
     if(!r||typeof r.id!=='string'||hidden.indexOf(r.id)>=0)return false;
     if(mode===1)return favorites.indexOf(r.id)>=0;
     if(mode===2)return isRunAction(r.domain);
