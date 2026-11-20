@@ -108,7 +108,10 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
     'Show All immediately changes visible settings rows');
   assert(JS.includes("r.domain==='light'")&&JS.includes('isFanControl(r)'),
     'The filter includes lights and fan-backed switches');
-  assert(JS.includes('renderRoomHeaders()'),'Empty room titles disappear when filtered');
+  assert(JS.includes('clay.meta.userData={')&&JS.includes('var settings=page.meta.userData||{}'),
+    'Lights/Fans metadata survives Clay callback serialization into separate webview');
+  assert(JS.includes("group.element.style.display=toggle.checked||any"),
+    'Empty room titles disappear when filtered');
   h.handlers.webviewclosed({response:encodeURIComponent(JSON.stringify({
     SHOW_ALL_DEVICES:{value:true},DEV_96:{value:[true,false]}
   }))});
