@@ -81,7 +81,8 @@
       "CTRL_LEVEL",
       "CTRL_ADJUSTABLE",
       "CTRL_DIRECTION",
-      "CTRL_ADVANCED"
+      "CTRL_ADVANCED",
+      "THEME_MODE_CODE"
     ],
     "projectType": "native",
     "resources": {
@@ -162,6 +163,6 @@
       }
     ]
   },
-  "version": "1.5.6",
-  "description": "Home Assistant Control Center with Google Home-style inline room headers and direct device access"
+  "version": "1.5.7",
+  "description": "Home Assistant Control Center with on-watch Settings and immediate paginated fan recheck"
 }
