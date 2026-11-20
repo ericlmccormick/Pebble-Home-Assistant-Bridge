@@ -5,9 +5,10 @@
 
 // Control Center is a separate window stack from the established voice/audio UI.
 // Keep watch memory bounded and never expose high-risk device domains.
-#define CONTROL_MAX 48
-// 72 bytes per row, 48 rows = 3456 bytes. Three rows (216 bytes)
-// per persist key stay below Pebble's 256-byte value limit and 4KB total.
+#define PAGE_SIZE 32
+// A page is an internal RAM/storage window, not a device limit.
+// Only identity and room metadata survive watch restarts. Live status and
+// adjustable controls are intentionally discarded and read on selection.
 #define NAME_LEN 36
 #define ROOM_LEN 22
 #define STATE_LEN 12
@@ -15,25 +16,43 @@
 #define CACHE_COUNT_KEY 3800
 #define CACHE_REV_KEY 3801
 #define CACHE_STAMP_KEY 3802
+#define CACHE_MODE_KEY 3803
+#define CACHE_OFFSET_KEY 3804
+#define CACHE_MORE_KEY 3805
+#define CACHE_TOTAL_KEY 3806
+#define CACHE_SCHEMA_KEY 3807
+#define CACHE_SCHEMA_VERSION 3
 #define CACHE_FIRST_ROW_KEY 3900
 #define CACHE_REFRESH_SECONDS 3600
 typedef struct {
-  char name[NAME_LEN], room[ROOM_LEN], state[STATE_LEN];
+  char name[NAME_LEN],room[ROOM_LEN];
   uint8_t kind;
   bool favorite;
-  bool advanced;
+} CachedRow;
+typedef struct {
+  char name[NAME_LEN],room[ROOM_LEN];
+  uint8_t kind;
+  bool favorite;
+  char state[STATE_LEN]; // RAM only, never persisted
+  bool advanced;        // RAM only, never persisted
 } ControlRow;
 typedef char cache_row_chunk_fits_persist_value[
-  sizeof(ControlRow)*CACHE_ROWS_PER_KEY<=PERSIST_DATA_MAX_LENGTH?1:-1];
-typedef char cache_catalog_fits_minimum_quota[
-  sizeof(ControlRow)*CONTROL_MAX+16*20+128<4096?1:-1];
-static ControlRow s_rows[CONTROL_MAX];
+  sizeof(CachedRow)*CACHE_ROWS_PER_KEY<=PERSIST_DATA_MAX_LENGTH?1:-1];
+typedef char cache_page_fits_minimum_quota[
+  sizeof(CachedRow)*PAGE_SIZE+16*20+128<4096?1:-1];
+static ControlRow s_rows[PAGE_SIZE];
+static ControlRow s_incoming[PAGE_SIZE];
+static bool s_received_rows=false;
+static int s_incoming_count=0;
+static int s_page_offset=0,s_request_offset=0,s_total_count=0,s_cached_mode=0;
+static bool s_has_more=false;
 static int s_count=0, s_mode=0; // 0: rooms; 1: favorites; 2: scenes/scripts
-static uint8_t s_visible[CONTROL_MAX];
+static uint8_t s_visible[PAGE_SIZE];
 static int s_visible_count=0, s_room_count=0;
-static char s_rooms[CONTROL_MAX][ROOM_LEN];
-static uint8_t s_room_sizes[CONTROL_MAX];
-static uint8_t s_room_starts[CONTROL_MAX];
+static char s_rooms[PAGE_SIZE][ROOM_LEN];
+static uint8_t s_room_sizes[PAGE_SIZE];
+static uint8_t s_room_starts[PAGE_SIZE];
+static bool s_next_page=false,s_prev_page=false;
 static bool s_loading=false;
 static Window *s_home=NULL,*s_list=NULL,*s_detail_window=NULL,*s_settings_window=NULL,*s_volume_window=NULL;
 static Layer *s_volume_settings_layer=NULL;
@@ -46,7 +65,7 @@ static TextLayer *s_hint=NULL;
 static char s_hint_text[64]="Select: toggle or run";
 static int32_t s_catalog_revision=0;
 static time_t s_last_sync_at=0;
-static bool s_catalog_loaded=false,s_sync_pending=false,s_catalog_dirty=false;
+static bool s_catalog_loaded=false,s_sync_pending=false;
 
 static bool s_large_text=false;
 static bool s_night_theme=false;
@@ -104,8 +123,11 @@ static bool send_command(const char *command,int index){
   if(app_message_outbox_begin(&out)!=APP_MSG_OK||!out)return false;
   dict_write_cstring(out,MESSAGE_KEY_COMMAND,command);
   if(index>=0)dict_write_int32(out,MESSAGE_KEY_CTRL_INDEX,index);
-  if(strcmp(command,"CTRL_REQUEST")==0)
-    dict_write_int32(out,MESSAGE_KEY_CTRL_REV,s_catalog_revision);
+  if(strcmp(command,"CTRL_REQUEST")==0){
+    bool same=s_request_offset==s_page_offset&&s_cached_mode==s_mode;
+    dict_write_int32(out,MESSAGE_KEY_CTRL_REV,same?s_catalog_revision:0);
+    dict_write_int32(out,MESSAGE_KEY_CTRL_OFFSET,s_request_offset);
+  }
   dict_write_end(out);
   return app_message_outbox_send()==APP_MSG_OK;
 }
@@ -274,50 +296,75 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
 }
 // A single row is below Pebble's 256-byte persistent storage entry limit.
 // Store the watch catalog once, then rebuild Favorites and Rooms locally.
+static void cache_schema_migrate(void){
+  if(persist_exists(CACHE_SCHEMA_KEY)&&
+     persist_read_int(CACHE_SCHEMA_KEY)==CACHE_SCHEMA_VERSION)return;
+  // v1.5.x stored state and capability in 48 persistent records. Remove the
+  // old blocks before writing the smaller v3 metadata-only pages, otherwise
+  // the now-unused old blocks can exhaust the 4KB quota.
+  for(int i=0;i<48;i++)persist_delete(CACHE_FIRST_ROW_KEY+i);
+  persist_delete(CACHE_COUNT_KEY);persist_delete(CACHE_REV_KEY);
+  persist_delete(CACHE_STAMP_KEY);persist_delete(CACHE_MODE_KEY);
+  persist_delete(CACHE_OFFSET_KEY);persist_delete(CACHE_MORE_KEY);
+  persist_delete(CACHE_TOTAL_KEY);
+  persist_write_int(CACHE_SCHEMA_KEY,CACHE_SCHEMA_VERSION);
+}
 static void catalog_restore(void){
   if(s_catalog_loaded)return;
   s_catalog_loaded=true;
+  cache_schema_migrate();
   int count=persist_exists(CACHE_COUNT_KEY)?persist_read_int(CACHE_COUNT_KEY):0;
-  if(count<0||count>CONTROL_MAX)return;
+  if(count<0||count>PAGE_SIZE)return;
   for(int start=0;start<count;start+=CACHE_ROWS_PER_KEY){
+    CachedRow block[CACHE_ROWS_PER_KEY];
     int n=(count-start)>CACHE_ROWS_PER_KEY?CACHE_ROWS_PER_KEY:(count-start);
-    int size=n*(int)sizeof(ControlRow);
+    int size=n*(int)sizeof(CachedRow);
     if(size>PERSIST_DATA_MAX_LENGTH||
        persist_get_size(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY)!=size||
-       persist_read_data(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY,&s_rows[start],size)!=size){
+       persist_read_data(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY,block,size)!=size){
       s_count=0;s_catalog_revision=0;return;
     }
-  }
-  for(int i=0;i<count;i++){
-    s_rows[i].name[NAME_LEN-1]=0;
-    s_rows[i].room[ROOM_LEN-1]=0;
-    s_rows[i].state[STATE_LEN-1]=0;
+    for(int i=0;i<n;i++){
+      ControlRow *row=&s_rows[start+i];
+      memset(row,0,sizeof(*row));
+      memcpy(row->name,block[i].name,NAME_LEN);
+      memcpy(row->room,block[i].room,ROOM_LEN);
+      row->name[NAME_LEN-1]=0;row->room[ROOM_LEN-1]=0;
+      row->kind=block[i].kind;row->favorite=block[i].favorite;
+    }
   }
   s_count=count;
   s_catalog_revision=persist_exists(CACHE_REV_KEY)?persist_read_int(CACHE_REV_KEY):0;
   s_last_sync_at=persist_exists(CACHE_STAMP_KEY)?(time_t)persist_read_int(CACHE_STAMP_KEY):0;
+  s_cached_mode=persist_exists(CACHE_MODE_KEY)?persist_read_int(CACHE_MODE_KEY):0;
+  s_page_offset=persist_exists(CACHE_OFFSET_KEY)?persist_read_int(CACHE_OFFSET_KEY):0;
+  s_has_more=persist_exists(CACHE_MORE_KEY)?persist_read_int(CACHE_MORE_KEY)!=0:false;
+  s_total_count=persist_exists(CACHE_TOTAL_KEY)?persist_read_int(CACHE_TOTAL_KEY):count;
+  s_request_offset=s_page_offset;
 }
 static bool catalog_store(void){
-  // Persist metadata only after a successfully completed catalog transfer.
-  // We intentionally don't rewrite all 16 blocks during unchanged hourly checks.
   for(int start=0;start<s_count;start+=CACHE_ROWS_PER_KEY){
+    CachedRow block[CACHE_ROWS_PER_KEY];
     int n=(s_count-start)>CACHE_ROWS_PER_KEY?CACHE_ROWS_PER_KEY:(s_count-start);
-    int size=n*(int)sizeof(ControlRow);
+    int size=n*(int)sizeof(CachedRow);
+    for(int i=0;i<n;i++){
+      ControlRow *row=&s_rows[start+i];
+      memset(&block[i],0,sizeof(CachedRow));
+      memcpy(block[i].name,row->name,NAME_LEN);
+      memcpy(block[i].room,row->room,ROOM_LEN);
+      block[i].kind=row->kind;block[i].favorite=row->favorite;
+    }
     if(size>PERSIST_DATA_MAX_LENGTH||
-       persist_write_data(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY,
-         &s_rows[start],size)!=size)return false;
+       persist_write_data(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY,block,size)!=size)return false;
   }
   persist_write_int(CACHE_COUNT_KEY,s_count);
   persist_write_int(CACHE_REV_KEY,s_catalog_revision);
   persist_write_int(CACHE_STAMP_KEY,(int)s_last_sync_at);
+  persist_write_int(CACHE_MODE_KEY,s_cached_mode);
+  persist_write_int(CACHE_OFFSET_KEY,s_page_offset);
+  persist_write_int(CACHE_MORE_KEY,s_has_more?1:0);
+  persist_write_int(CACHE_TOTAL_KEY,s_total_count);
   return true;
-}
-static void catalog_store_status(int index){
-  int start=index-(index%CACHE_ROWS_PER_KEY);
-  int n=(s_count-start)>CACHE_ROWS_PER_KEY?CACHE_ROWS_PER_KEY:(s_count-start);
-  if(n<=0)return;
-  persist_write_data(CACHE_FIRST_ROW_KEY+start/CACHE_ROWS_PER_KEY,
-    &s_rows[start],n*sizeof(ControlRow));
 }
 static void visible_rebuild(void){
   s_visible_count=0;
@@ -516,7 +563,7 @@ static void rooms_rebuild(void){
     bool new_room=s_room_count==0||
       strcmp(s_rooms[s_room_count-1],r->room)!=0;
     if(new_room){
-      if(s_room_count>=CONTROL_MAX)break;
+      if(s_room_count>=PAGE_SIZE)break;
       snprintf(s_rooms[s_room_count],ROOM_LEN,"%s",r->room);
       s_room_starts[s_room_count]=(uint8_t)vi;
       s_room_sizes[s_room_count]=0;
@@ -809,7 +856,7 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     Tuple *advanced=dict_find(iter,MESSAGE_KEY_CTRL_ADVANCED);
     if(!i||!n||!st)return;
     int index=i->value->int32;
-    if(index<0||index>=CONTROL_MAX)return;
+    if(index<0||index>=PAGE_SIZE)return;
     snprintf(s_rows[index].name,sizeof(s_rows[index].name),"%s",n->value->cstring);
     snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
     snprintf(s_rows[index].room,sizeof(s_rows[index].room),"%s",room?room->value->cstring:"Unassigned");
@@ -838,7 +885,7 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     Tuple *rev=dict_find(iter,MESSAGE_KEY_CTRL_REV);
     if(count&&rev){
       int n=count->value->int32;
-      if(n<0||n>CONTROL_MAX)return;
+      if(n<0||n>PAGE_SIZE)return;
       bool changed=s_catalog_dirty||n!=s_count;
       s_count=n;
       s_catalog_revision=rev->value->int32;
