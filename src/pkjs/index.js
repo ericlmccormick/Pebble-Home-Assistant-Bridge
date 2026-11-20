@@ -138,7 +138,7 @@ var clayConfig=[
 ];
 var clay=new Clay(clayConfig,null,{autoHandleEvents:false});
 var favoriteConfigRows=[];
-var roomConfigGroups=[];
+
 var CATALOG_CACHE_KEY='HA_CONTROLS_CACHE_V1';
 var CATALOG_FETCH_AT_KEY='HA_CONTROLS_FETCHED_AT_V2';
 var CATALOG_TTL_MS=60*60*1000;
@@ -228,6 +228,7 @@ function configureWithDevices(rows){
   });
   var items=[
     {type:'heading',defaultValue:'Watch devices'},
+    {type:'text',defaultValue:'By default: lights, fans, and switches. Show All includes scenes, scripts, and other devices.'},
     {type:'text',defaultValue:'Tap the star to favorite or the crossed circle to hide. Hidden favorites remain saved.'},
     {type:'toggle',messageKey:'SHOW_ALL_DEVICES',label:'Show all device types',
       defaultValue:showAllDevices},
@@ -243,7 +244,6 @@ function configureWithDevices(rows){
       // More-specific important rules must override the compact row's
       // display:flex!important, which defeated inline style.display='none'.
       '.component-checkbox.ha-device-filter-hidden{display:none!important;}'+
-      '.component-heading.ha-room-filter-hidden{display:none!important;}'+
       '.component-checkbox>.label{display:block;flex:1 1 auto;min-width:0;font-weight:400!important;font-size:14px!important;line-height:1.25;white-space:normal;overflow-wrap:anywhere;padding:0!important;margin:0!important;max-height:2.6em;overflow:hidden;}'+
       '.component-checkbox .checkbox-group{display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;gap:0;margin:0!important;padding:0!important;}'+
       '.component-checkbox .checkbox-group label{display:flex!important;flex:0 0 44px;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;margin:0!important;padding:0!important;position:relative;}'+
@@ -260,16 +260,12 @@ function configureWithDevices(rows){
       '</style>'}
   ];
   var previousRoom='';
-  roomConfigGroups=[];
   favoriteConfigRows.forEach(function(r,i){
     var room=String(r.room||'Unassigned');
     if(room!==previousRoom){
       previousRoom=room;
-      var id='WATCH_ROOM_'+roomConfigGroups.length;
-      roomConfigGroups.push({id:id,start:i,count:0});
-      items.push({type:'heading',id:id,defaultValue:room.slice(0,36)});
+      items.push({type:'heading',defaultValue:room.slice(0,36)});
     }
-    roomConfigGroups[roomConfigGroups.length-1].count++;
     // Native Clay checkbox groups are serialized by the phone configuration
     // page. They do not use Pebble AppMessage keys or a finite 48-item list.
     items.push({
@@ -284,45 +280,29 @@ function configureWithDevices(rows){
     items.push({type:'text',defaultValue:'No cached devices yet. Open Devices by Room on the watch, then reopen Settings.'});
   // Display and Bridge first, then the grouped per-device controls.
   cfg.splice(cfg.length-1,0,{type:'section',items:items});
-  // Hide non-light/fan options by default without removing them from the
-  // form; this keeps every favorite/hide choice intact across filter changes.
-  // Clay's AFTER_BUILD event fires after the HTML controls are in the DOM.
-  // Clay serializes this callback into a separate HTML webview. It cannot
-  // capture PebbleKit JS variables. Transfer only non-sensitive visibility
-  // flags and room ranges through Clay's embedded page metadata.
+  // Keep all room headings visible in either filter mode. Clay renders
+  // heading elements independently of checkbox rows; hiding them by a
+  // positional room map caused visible devices to lose their room context.
+  // Only the device rows are filtered; favorites/hidden preferences remain
+  // independent of this display-only choice.
   clay=new Clay(cfg,function(){
     var page=this;
     page.on(page.EVENTS.AFTER_BUILD,function(){
       var data=page.meta.userData||{};
-      var flags=data.lightFanFlags||[],groups=data.roomGroups||[];
+      var flags=data.primaryDeviceFlags||[];
       var control=page.getItemByMessageKey('SHOW_ALL_DEVICES');
       var toggleRoot=control&&control.$element&&control.$element[0];
       var toggle=toggleRoot&&toggleRoot.querySelector('input[type="checkbox"]');
-      // Do not assume checkboxgroups are the only .component-checkbox nodes:
-      // resolve each exact DEV_i key through Clay's own registry.
-      var deviceElements=flags.map(function(flag,i){
+      var elements=flags.map(function(flag,i){
         var item=page.getItemByMessageKey('DEV_'+i);
         return item&&item.$element&&item.$element[0];
-      });
-      groups.forEach(function(group){
-        var heading=page.getItemById(group.id);
-        group.element=heading&&heading.$element&&heading.$element[0];
       });
       function render(){
         var all=toggle?!!toggle.checked:!!data.showAllDefault;
         for(var i=0;i<flags.length;i++){
-          var el=deviceElements[i];
-          if(el)el.classList.toggle('ha-device-filter-hidden',!all&&!flags[i]);
+          var row=elements[i];
+          if(row)row.classList.toggle('ha-device-filter-hidden',!all&&!flags[i]);
         }
-        groups.forEach(function(group){
-          if(!group.element)return;
-          var hasLightOrFan=false;
-          for(var j=group.start;j<group.start+group.count;j++){
-            if(flags[j]){hasLightOrFan=true;break;}
-          }
-          group.element.classList.toggle('ha-room-filter-hidden',
-            !all&&!hasLightOrFan);
-        });
       }
       if(toggle)toggle.addEventListener('change',render);
       render();
@@ -330,11 +310,9 @@ function configureWithDevices(rows){
   },{autoHandleEvents:false});
   clay.meta.userData={
     showAllDefault:showAllDevices,
-    lightFanFlags:favoriteConfigRows.map(function(r){
-      return r.domain==='light'||isFanControl(r);
-    }),
-    roomGroups:roomConfigGroups.map(function(group){
-      return {id:group.id,start:group.start,count:group.count};
+    primaryDeviceFlags:favoriteConfigRows.map(function(r){
+      return r.domain==='light'||r.domain==='fan'||r.domain==='switch'||
+        isFanControl(r);
     })
   };
   Pebble.openURL(clay.generateUrl());
