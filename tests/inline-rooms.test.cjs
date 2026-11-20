@@ -30,22 +30,24 @@ for(const claim of ['s_room_starts[s_room_count]=(uint8_t)vi',
   assert(grouping.includes(claim),'Room sections build from device catalog: '+claim);
 }
 const mapping=between(c,'static int catalog_index_for(MenuIndex *idx){','static void draw_cell(');
-assert(mapping.includes('s_room_starts[idx->section]+idx->row'));
+assert(mapping.includes('s_room_starts[sec]+idx->row'));
 assert(mapping.includes('return s_visible[visible_index]'),
   'Device actions retain the phone watch-index, not room-local menu row');
-assert(mapping.includes('idx->row>=s_room_sizes[idx->section]'),
+assert(mapping.includes('idx->row>=s_room_sizes[sec]'),
   'Out-of-bounds room rows cannot control devices');
 const act=between(c,'static void select_row(','static void list_load(');
-assert(act.includes('send_command("CTRL_ACT",catalog_index)'));
-assert(act.includes('detail_push(catalog_index)'),'Toggle devices open a details view');
+assert(act.includes('send_command("CTRL_INSPECT",index)'),'Selecting a device retrieves live capability first');
+assert(act.includes('nav_action(idx)')&&act.includes('s_request_offset=target'),
+  'More and Previous actions page the watch catalog');
 assert(!act.includes('send_command("CTRL_ACT",idx->row)'));
 const header=between(c,'static void draw_room_header(','static uint16_t num_rows(');
 assert(header.includes('ui_muted()'),'Room header colors follow day/night theme');
 assert(header.includes('FONT_KEY_GOTHIC_14_BOLD'),'Normal text has compact headings');
 assert(header.includes('FONT_KEY_GOTHIC_18_BOLD'),'Large text uses readable headings');
 const sectionCount=between(c,'static uint16_t num_sections(','static int16_t cell_height(');
-assert(sectionCount.includes('s_mode==0&&s_room_count>0?s_room_count:1'));
-assert(sectionCount.includes('return section<s_room_count?s_room_sizes[section]:0'));
+assert(sectionCount.includes('return base_sections()+(s_page_offset>0?1:0)+(s_has_more?1:0)'),
+  'Room headers share a paged list with Previous and More sections');
+assert(sectionCount.includes('return sec<s_room_count?s_room_sizes[sec]:0'));
 assert(sectionCount.includes('s_visible_count?s_visible_count:1'),
   'Empty catalogs still show placeholder and favorites/scenes remain flat');
 assert(!c.includes('s_room_window')&&!c.includes('s_room_menu'),
