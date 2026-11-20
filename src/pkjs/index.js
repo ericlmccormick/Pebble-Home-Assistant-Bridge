@@ -138,6 +138,7 @@ var clayConfig=[
 ];
 var clay=new Clay(clayConfig,null,{autoHandleEvents:false});
 var favoriteConfigRows=[];
+var roomConfigGroups=[];
 var CATALOG_CACHE_KEY='HA_CONTROLS_CACHE_V1';
 var CATALOG_FETCH_AT_KEY='HA_CONTROLS_FETCHED_AT_V2';
 var CATALOG_TTL_MS=60*60*1000;
@@ -252,12 +253,16 @@ function configureWithDevices(rows){
       '</style>'}
   ];
   var previousRoom='';
+  roomConfigGroups=[];
   favoriteConfigRows.forEach(function(r,i){
     var room=String(r.room||'Unassigned');
     if(room!==previousRoom){
       previousRoom=room;
-      items.push({type:'heading',defaultValue:room.slice(0,36)});
+      var id='WATCH_ROOM_'+roomConfigGroups.length;
+      roomConfigGroups.push({id:id,start:i,count:0});
+      items.push({type:'heading',id:id,defaultValue:room.slice(0,36)});
     }
+    roomConfigGroups[roomConfigGroups.length-1].count++;
     // Native Clay checkbox groups are serialized by the phone configuration
     // page. They do not use Pebble AppMessage keys or a finite 48-item list.
     items.push({
@@ -291,8 +296,25 @@ function configureWithDevices(rows){
             r.domain==='light'?'':'none';
         }
       }
-      toggle.addEventListener('change',renderFilter);
-      renderFilter();
+      roomConfigGroups.forEach(function(group){
+        var heading=page.getItemById(group.id);
+        group.element=heading&&heading.$element&&heading.$element[0];
+      });
+      function renderRoomHeaders(){
+        roomConfigGroups.forEach(function(group){
+          if(!group.element)return;
+          var any=false;
+          for(var j=group.start;j<group.start+group.count;j++){
+            var row=favoriteConfigRows[j];
+            if(isFanControl(row)||row.domain==='light'){any=true;break;}
+          }
+          group.element.style.display=toggle.checked||any?'':'none';
+        });
+      }
+      toggle.addEventListener('change',function(){
+        renderFilter();renderRoomHeaders();
+      });
+      renderFilter();renderRoomHeaders();
     });
   },{autoHandleEvents:false});
   Pebble.openURL(clay.generateUrl());
