@@ -151,6 +151,7 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   assert(C.includes('More devices'));
   assert(C.includes('s_incoming[index]'),'Atomic page staging prevents partial lists');
   assert(!C.includes('catalog_store_status('),'Status must never be persisted');
+  assert(C.includes('!state[0]'),'Unknown state must draw a neutral icon until inspected');
   for(const key of ['CTRL_OFFSET','CTRL_HAS_MORE','CTRL_GRAND_TOTAL'])
     assert(manifest.pebble.messageKeys.includes(key),'Missing page protocol key '+key);
   console.log('Unlimited phone catalog, dynamic settings, Lights/Fans filter, paged watch navigation and lazy state passed');
