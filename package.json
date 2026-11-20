@@ -35,6 +35,9 @@
       "CTRL_DIRECTION",
       "CTRL_ADVANCED",
       "THEME_MODE_CODE",
+      "THEME_SUNRISE_MIN",
+      "THEME_SUNSET_MIN",
+      "THEME_SOLAR_SYNC_AT",
       "CTRL_OFFSET",
       "CTRL_GRAND_TOTAL",
       "CTRL_HAS_MORE"
@@ -118,6 +121,6 @@
       }
     ]
   },
-  "version": "1.6.8",
-  "description": "Home Assistant Control Center with phone-only startup state prefetch and on-demand watch updates"
+  "version": "1.6.9",
+  "description": "Home Assistant Control Center with first-frame theme restoration and cached sunrise/sunset"
 }
