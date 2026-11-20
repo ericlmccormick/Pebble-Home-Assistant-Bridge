@@ -73,6 +73,10 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   assert(h.sent.filter(x=>x.COMMAND==='CTRL_ROW').every(r=>
     !('CTRL_STATUS' in r)&&!('CTRL_ADVANCED' in r)),
     'Status and advanced capability are not pushed with names and rooms');
+  assert(h.sent.some(m=>m.COMMAND==='CTRL_STATE'&&m.CTRL_REV===done.CTRL_REV),
+    'Background status arrives after metadata with the matching revision');
+  assert(h.calls.some(c=>c.action==='get_state'),
+    'Only visible watch-page devices are read in the background');
   assert(JSON.parse(storage.HA_CONTROLS_CACHE_V1).every(x=>
     !('state' in x)&&!('advanced' in x)&&!('brightness' in x)),
     'Phone remembers only metadata');
@@ -102,26 +106,13 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   const devices=sections[2].items.filter(x=>x.type==='checkboxgroup');
   assert.strictEqual(devices.length,97);
   assert.strictEqual(devices[96].messageKey,'DEV_96');
-  const filter=sections[2].items.find(x=>x.messageKey==='SHOW_ALL_DEVICES');
-  assert(filter&&filter.defaultValue===false,'Lights, Fans & Switches is default view');
-  assert(JS.includes("page.EVENTS.AFTER_BUILD")&&
-    JS.includes("control.on('change',render)")&&JS.includes('control.get()'),
-    'Show All immediately changes visible settings rows via Clay item API');
-  assert(JS.includes("r.domain==='light'")&&JS.includes("r.domain==='fan'")&&
-    JS.includes("r.domain==='switch'")&&JS.includes('isFanControl(r)'),
-    'The default filter includes lights, fans and ordinary switches');
-  assert(JS.includes('clay.meta.userData={')&&JS.includes('var data=page.meta.userData||{}'),
-    'Device type metadata survives Clay callback serialization into separate webview');
-  assert(JS.includes('.component-checkbox.ha-device-filter-hidden{display:none!important;}'),
-    'Filtered device rows override the compact layout flex!important rule');
-  assert(!JS.includes('ha-room-filter-hidden'),
-    'Room headings are always present regardless of device type filtering');
-  assert(JS.includes('page.getItemByMessageKey(\'DEV_\'+i)'),
-    'Filter resolves each exact device row instead of relying on DOM list order');
+  assert(!sections[2].items.some(x=>x.messageKey==='SHOW_ALL_DEVICES'),
+    'Removed unreliable device type filter from phone settings');
+  assert(sections[2].items.filter(x=>x.type==='heading').length>=2,
+    'Keep room headings above devices');
   h.handlers.webviewclosed({response:encodeURIComponent(JSON.stringify({
-    SHOW_ALL_DEVICES:{value:true},DEV_96:{value:[true,false]}
+    DEV_96:{value:[true,false]}
   }))});
-  assert.strictEqual(storage.SHOW_ALL_DEVICES,'true');
   assert(JSON.parse(storage.HA_FAVORITES_V1).includes('light.porch'));
   assert(!JSON.parse(storage.HA_HIDDEN_V1).includes('light.porch'));
 
@@ -137,7 +128,7 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   h.fire({COMMAND:'CTRL_INSPECT',CTRL_INDEX:fanIndex});
   await flush();
   assert.strictEqual(h.calls.filter(x=>x.action==='get_state').length,callsBefore+1,
-    'Only the selected fan gets an API state lookup');
+    'Selected fan gets one fresh lookup beyond background statuses');
   assert(h.sent.some(x=>x.COMMAND==='CTRL_DETAIL_OPEN'&&x.CTRL_INDEX===fanIndex));
   assert(h.sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_ADJUSTABLE===1));
 
@@ -160,5 +151,5 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   assert(C.includes('!state[0]'),'Unknown state must draw a neutral icon until inspected');
   for(const key of ['CTRL_OFFSET','CTRL_HAS_MORE','CTRL_GRAND_TOTAL'])
     assert(manifest.pebble.messageKeys.includes(key),'Missing page protocol key '+key);
-  console.log('Unlimited phone catalog, dynamic settings, Lights/Fans filter, paged watch navigation and lazy state passed');
+  console.log('Full catalog, unfiltered settings, page-by-page live states and adjustable device lookup passed');
 })().catch(e=>{console.error(e);process.exit(1);});
