@@ -342,7 +342,9 @@ Pebble.addEventListener('webviewclosed',function(e){
     }
   }
   if(valueBoolean(field('REFRESH_DEVICES'),false)){
-    forceRefreshControls();
+    forceRefreshControls().catch(function(err){
+      console.log('Manual Bridge refresh: '+String(err&&err.message||err));
+    });
   }
   if(field('ENABLE_TTS')!==undefined){
     enableTts=valueBoolean(field('ENABLE_TTS'),enableTts);
