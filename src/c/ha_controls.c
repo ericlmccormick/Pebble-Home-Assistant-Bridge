@@ -92,7 +92,7 @@ static GColor cell_fg(bool active){return active?ui_selected_fg():ui_fg();}
 static GColor cell_sub(bool active){return active?ui_selected_fg():ui_muted();}
 static int title_height(void){return s_large_text?48:23;}
 static int sub_top(void){return s_large_text?56:23;}
-static int row_height(void){return s_large_text?80:46;}
+static int row_height(void){return s_large_text?62:46;}
 static int title_top(void){return s_large_text?7:3;}
 static int home_title_top(void){return s_large_text?(row_height()-title_height())/2:3;}
 static void refresh_menu(MenuLayer *m,Window *w){
@@ -582,6 +582,12 @@ static void list_load(Window *w){
 #endif
   menu_layer_set_click_config_onto_window(s_menu,w);
   layer_add_child(window_get_root_layer(w),menu_layer_get_layer(s_menu));
+  // Starting on the selected device normally scrolls its section header
+  // above the viewport. Force the actual scroll offset to top on entry.
+  if(s_mode==0){
+    menu_layer_set_selected_index(s_menu,(MenuIndex){.section=0,.row=0},MenuRowAlignTop,false);
+    scroll_layer_set_content_offset(menu_layer_get_scroll_layer(s_menu),GPoint(0,0),false);
+  }
   s_hint=text_layer_create(GRect(0,b.size.h-20,b.size.w,20));
   text_layer_set_background_color(s_hint,ui_bg());
   text_layer_set_text_color(s_hint,ui_fg());
@@ -807,8 +813,12 @@ static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,20),b.size.h/2),(uint8_t)(idx->row+8),active,NULL);
   int x=PBL_IF_ROUND_ELSE(60,39);
   graphics_context_set_text_color(ctx,cell_fg(active));
+  // Center the title vertically against the icon, including when large
+  // accessibility text wraps; don't pin large titles to the top of each row.
+  int title_h=s_large_text?48:title_height();
+  int title_y=s_large_text?(b.size.h-title_h)/2-2:home_title_top();
   graphics_draw_text(ctx,home_names[idx->row],title_font(),
-    GRect(x,home_title_top(),b.size.w-x-7,title_height()),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    GRect(x,title_y,b.size.w-x-7,title_h),s_large_text?GTextOverflowModeWordWrap:GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   graphics_context_set_text_color(ctx,cell_sub(active));
   if(!s_large_text)graphics_draw_text(ctx,home_subs[idx->row],sub_font(),
     GRect(x,sub_top(),b.size.w-x-7,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
@@ -816,7 +826,7 @@ static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
 static uint16_t home_rows(MenuLayer *m,uint16_t sec,void *ctx){return 5;}
 static void home_select(MenuLayer *m,MenuIndex *idx,void *ctx){
   switch(idx->row){
-    case 0:window_stack_pop(true);controls_start_voice();break;
+    case 0:window_stack_pop(false);controls_start_voice();break;
     case 1:controls_open_mode(1);break;
     case 2:controls_open_mode(0);break;
     case 3:controls_open_mode(2);break;
@@ -996,6 +1006,8 @@ void controls_receive(DictionaryIterator *iter,const char *command){
       if(page_changed&&s_count>0){
         MenuIndex first={.section=(uint16_t)(s_page_offset>0?1:0),.row=0};
         menu_layer_set_selected_index(s_menu,first,MenuRowAlignTop,false);
+        if(s_mode==0&&s_page_offset==0)
+          scroll_layer_set_content_offset(menu_layer_get_scroll_layer(s_menu),GPoint(0,0),false);
       }
     }
     if(s_hint)text_layer_set_text(s_hint,s_hint_text);
