@@ -11,14 +11,15 @@ assert(c.includes('return m==s_home_menu?row_height():(s_large_text?58:38)'),
   'Compact device rows preserve readable home navigation');
 assert(c.includes('dimmed?(highlighted?ui_selected_bg():ui_bg())'),
   'Off/unavailable badges remain outlined, not lit');
-assert(c.includes('detail_push(catalog_index)'));
+assert(c.includes('detail_push(index,false)'));
+assert(c.includes('send_command("CTRL_INSPECT",index)'));
 assert(c.includes('window_single_click_subscribe(BUTTON_ID_UP,detail_up_click)'));
 assert(c.includes('window_single_click_subscribe(BUTTON_ID_DOWN,detail_down_click)'));
 assert(c.includes('static void detail_click_config(void *context)'));
-assert(c.includes('if(s_rows[catalog_index].advanced){detail_push(catalog_index);return;}'),
-  'Only actual dimmers or adjustable fans and lights open a detail page');
-assert(c.includes('send_command("CTRL_ACT",catalog_index)'),
-  'Simple on/off lights, fans and switches toggle from the device list');
+assert(c.includes('if(strcmp(command,"CTRL_DETAIL_OPEN")==0)'),
+  'A live capability check opens details only for adjustable entities');
+assert(js.includes("if(meta.adjustable){")&&js.includes('controlAct(index);'),
+  'Simple entities toggle after live inspection; adjustable devices open details');
 const state={
   'light.bed':{entity_id:'light.bed',state:'on',
     attributes:{brightness:128,supported_color_modes:['brightness']}},
@@ -32,7 +33,7 @@ const raw=[
   {id:'switch.desk',domain:'switch',room:'Office',name:'Desk',state:'off'}
 ];
 const store={HA_CONTROLS_CACHE_V1:JSON.stringify(raw),
-  HA_WATCH_IDS_V2:JSON.stringify(raw.map(r=>r.id))};
+  HA_WATCH_PAGE_IDS_V3:JSON.stringify(raw.map(r=>r.id))};
 const sent=[],calls=[],handlers={};
 const Pebble={
   addEventListener:(event,fn)=>handlers[event]=fn,
@@ -67,6 +68,9 @@ function fire(command,index,dir){
 }
 async function flush(){for(let i=0;i<12;i++)await new Promise(ok=>setImmediate(ok));}
 (async()=>{
+  fire('CTRL_INSPECT',0);await flush();
+  assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_OPEN'&&x.CTRL_INDEX===0),
+    'Dimmable light opens only after a live capability lookup');
   fire('CTRL_DETAILS',0);await flush();
   assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_ADJUSTABLE===1&&
     x.CTRL_LEVEL===50),'Dimmable light reports 50%');
