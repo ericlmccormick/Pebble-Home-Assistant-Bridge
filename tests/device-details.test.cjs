@@ -7,7 +7,7 @@ assert(pkg.pebble.messageKeys.includes('CTRL_LEVEL'));
 assert(pkg.pebble.messageKeys.includes('CTRL_ADJUSTABLE'));
 assert(pkg.pebble.messageKeys.includes('CTRL_DIRECTION'));
 assert(pkg.pebble.messageKeys.includes('CTRL_ADVANCED'));
-assert(c.includes('return m==s_home_menu?row_height():(s_large_text?68:50)'),
+assert(c.includes('return m==s_home_menu?row_height():(s_large_text?64:50)'),
   'Normal and Large rows leave room for two text lines');
 assert(c.includes('GRect(left,s_large_text?2:1,width,s_large_text?34:26)'),
   'Device names move back above the middle of the icon');
