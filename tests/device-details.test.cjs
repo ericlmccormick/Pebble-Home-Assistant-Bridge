@@ -32,7 +32,7 @@ const raw=[
   {id:'fan.office',domain:'fan',room:'Office',name:'Office fan',state:'on'},
   {id:'switch.desk',domain:'switch',room:'Office',name:'Desk',state:'off'}
 ];
-const store={HA_CONTROLS_CACHE_V1:JSON.stringify(raw),
+const store={HA_ROOM_CACHE_FORMAT:'json_rooms_v2',HA_CONTROLS_CACHE_V1:JSON.stringify(raw),
   HA_WATCH_PAGE_IDS_V3:JSON.stringify(raw.map(r=>r.id))};
 const sent=[],calls=[],handlers={};
 const Pebble={
