@@ -585,10 +585,22 @@ function controlRow(r,index){
 }
 var controlRows=[];
 var statePageGeneration=0;
+var STATE_FETCH_CONCURRENCY=6;
 function refreshPageStates(page,revision,generation){
-  // Metadata is rendered before any of these requests. Check only devices
-  // on this watch page, two workers max. Status is never saved to disk.
-  var cursor=0;
+  // Load current-page statuses in parallel; metadata and type icons are
+  // already visible. BLE AppMessages are still sent ONE at a time, waiting
+  // for each ACK to avoid overflowing the Pebble phone/watch queues.
+  // Nothing is persisted, and a new page invalidates old in-flight results.
+  var cursor=0,sendQueue=[],sending=false;
+  function drain(){
+    if(sending||generation!==statePageGeneration||!sendQueue.length)return;
+    sending=true;
+    var message=sendQueue.shift();
+    controlSend(message,function(){
+      sending=false;
+      if(generation===statePageGeneration)drain();
+    });
+  }
   function worker(){
     if(generation!==statePageGeneration)return Promise.resolve();
     var index=cursor++;
@@ -599,14 +611,18 @@ function refreshPageStates(page,revision,generation){
       if(generation!==statePageGeneration)return;
       var fresh=pluginJson(result);
       if(fresh&&fresh.state!==undefined){
-        controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
+        sendQueue.push({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
           CTRL_REV:revision,CTRL_STATUS:String(fresh.state).slice(0,11)});
+        drain();
       }
     }).catch(function(err){
       console.log('Background device state '+index+': '+String(err&&err.message||err));
     }).then(worker);
   }
-  return Promise.all([worker(),worker()]);
+  var workers=[];
+  for(var i=0;i<Math.min(STATE_FETCH_CONCURRENCY,page.length);i++)
+    workers.push(worker());
+  return Promise.all(workers);
 }
 function sendCatalog(watchRevision,rows,mode,offset,alwaysSend){
   mode=mode===1||mode===2?mode:0;
