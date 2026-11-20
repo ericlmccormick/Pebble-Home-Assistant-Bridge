@@ -45,7 +45,7 @@ function harness(store){
       throw Error('Unexpected action '+action);
     }
   };
-  function Clay(cfg){configs.push(cfg);this.generateUrl=()=> 'pebble://settings';}
+  function Clay(cfg){configs.push(cfg);this.meta={userData:{}};this.generateUrl=()=> 'pebble://settings';}
   const audio={diagnostics:()=>null,handleMessage:()=>false,stop:()=>{},speak:()=>Promise.resolve()};
   const context={Pebble,localStorage,console,Date,JSON,Math,Promise,Number,String,
     setTimeout:()=>1,setInterval:()=>1,
