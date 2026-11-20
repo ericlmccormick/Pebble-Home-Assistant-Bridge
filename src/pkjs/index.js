@@ -151,7 +151,6 @@ if(localStorage.getItem(ROOM_CACHE_FORMAT_KEY)!=='json_rooms_v2'){
   localStorage.setItem(ROOM_CACHE_FORMAT_KEY,'json_rooms_v2');
 }
 var PAGE_SIZE=32;
-var showAllDevices=localStorage.getItem('SHOW_ALL_DEVICES')==='true';
 var currentWatchMode=0,currentWatchOffset=0;
 var catalogPromise=null;
 function storedIds(key){
@@ -209,37 +208,56 @@ function isFanControl(row){
   if(!row)return false;
   if(row.domain==='fan')return true;
   if(row.domain!=='switch'&&row.domain!=='input_boolean')return false;
-  // A friendly name can be "Bedroom" while the HA entity ID is
-  // "switch.bedroom_ceiling_fan". Test both, accepting HA underscores.
-  var pattern=/(^|[^a-z0-9])(fan|fans|vent|ventilator|ventilation|exhaust|air[._ -]*handler)(?=$|[^a-z0-9])/i;
-  return pattern.test(String(row.name||''))||pattern.test(String(row.id||''));
+  var re=/(^|[^a-z0-9])(fan|fans|vent|ventilator|ventilation|exhaust|air[._ -]*handler)(?=$|[^a-z0-9])/i;
+  return re.test(String(row.name||''))||re.test(String(row.id||''));
 }
-function controlKind(domain,name){
-  if(isFanControl({domain:domain,name:name}))return 3;
-  return {light:1,switch:2,input_boolean:2,fan:3,cover:4,scene:5,script:6,automation:7}[domain]||0;
+function isLightControl(row){
+  if(!row)return false;
+  if(row.domain==='light')return true;
+  if(row.domain!=='switch'&&row.domain!=='input_boolean')return false;
+  // Some relay-backed fixtures are exposed as switch.* even though their
+  // physical device is a light. Prefer known entity_id and friendly name.
+  var re=/(^|[^a-z0-9])(light|lights|lamp|lamps|bulb|bulbs|lighting|chandelier|sconce|dimmer)(?=$|[^a-z0-9])/i;
+  return re.test(String(row.name||''))||re.test(String(row.id||''));
+}
+function controlKind(domain,name,id){
+  var row={domain:domain,name:name,id:id};
+  if(isFanControl(row))return 3;
+  if(isLightControl(row))return 1;
+  return {switch:2,input_boolean:2,cover:4,scene:5,script:6,automation:7}[domain]||0;
 }
 function isRunAction(domain){return /^(scene|script|automation)$/.test(String(domain||''));}
 function displayState(row){
   // A scene/script activation is an action, not an entity being switched on.
   return isRunAction(row.domain)?'Run':String(row.state||'unknown');
 }
+function deduplicateControls(rows){
+  var favorites=favoriteIds(),picked={},order=[];
+  (rows||[]).forEach(function(r){
+    if(!r||!r.id)return;
+    var id=String(r.id).toLowerCase();
+    // ID is the canonical identity. A repeated friendly name belonging to
+    // another domain remains an independent device.
+    var key=id;
+    if(!picked[key]){picked[key]=r;order.push(key);}
+    else if(favorites.indexOf(r.id)>=0)picked[key]=r;
+  });
+  return order.map(function(key){return picked[key];});
+}
 function configureWithDevices(rows){
   var cfg=clayConfig.slice();
   var favorites=favoriteIds(),hidden=hiddenIds();
-  // Clay serializes dynamically named checkboxes on the phone. Their keys
-  // are deliberately not sent as Pebble AppMessages, so they do not require
-  // a finite, predeclared set in the PBW manifest.
-  favoriteConfigRows=rows.slice().sort(function(a,b){
+  // Distinct IDs can produce duplicate Home Assistant rows (an exposed
+  // helper and its mirrored entity). Prefer explicitly favorited records
+  // when names, rooms and domains are otherwise identical.
+  favoriteConfigRows=deduplicateControls(rows).sort(function(a,b){
     return String(a.room||'').localeCompare(String(b.room||''))||
       String(a.name||'').localeCompare(String(b.name||''))||
       String(a.id||'').localeCompare(String(b.id||''));
   });
   var items=[
     {type:'heading',defaultValue:'Watch devices'},
-    {type:'text',defaultValue:'By default: lights, fans, and switches. Show All includes scenes, scripts, and other devices.'},
     {type:'text',defaultValue:'Tap the star to favorite or the crossed circle to hide. Hidden favorites remain saved.'},
-    {type:'toggle',messageKey:'SHOW_ALL_DEVICES',label:'Show all device types',
-      defaultValue:showAllDevices},
     {type:'toggle',messageKey:'REFRESH_DEVICES',label:'Force recheck now (Bridge)',
       defaultValue:false},
     // Keep the actual Clay checkbox inputs. Only restyle their two visible
@@ -251,7 +269,6 @@ function configureWithDevices(rows){
       '.component-checkbox{display:flex!important;align-items:center;gap:6px;min-height:46px;padding-top:4px!important;padding-bottom:4px!important;}'+
       // More-specific important rules must override the compact row's
       // display:flex!important, which defeated inline style.display='none'.
-      '.component-checkbox.ha-device-filter-hidden{display:none!important;}'+
       '.component-checkbox>.label{display:block;flex:1 1 auto;min-width:0;font-weight:400!important;font-size:14px!important;line-height:1.25;white-space:normal;overflow-wrap:anywhere;padding:0!important;margin:0!important;max-height:2.6em;overflow:hidden;}'+
       '.component-checkbox .checkbox-group{display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;gap:0;margin:0!important;padding:0!important;}'+
       '.component-checkbox .checkbox-group label{display:flex!important;flex:0 0 44px;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;margin:0!important;padding:0!important;position:relative;}'+
@@ -288,43 +305,9 @@ function configureWithDevices(rows){
     items.push({type:'text',defaultValue:'No cached devices yet. Open Devices by Room on the watch, then reopen Settings.'});
   // Display and Bridge first, then the grouped per-device controls.
   cfg.splice(cfg.length-1,0,{type:'section',items:items});
-  // Keep all room headings visible in either filter mode. Clay renders
-  // heading elements independently of checkbox rows; hiding them by a
-  // positional room map caused visible devices to lose their room context.
-  // Only the device rows are filtered; favorites/hidden preferences remain
-  // independent of this display-only choice.
-  clay=new Clay(cfg,function(){
-    var page=this;
-    page.on(page.EVENTS.AFTER_BUILD,function(){
-      var data=page.meta.userData||{};
-      var flags=data.primaryDeviceFlags||[];
-      var control=page.getItemByMessageKey('SHOW_ALL_DEVICES');
-      var elements=flags.map(function(flag,i){
-        var item=page.getItemByMessageKey('DEV_'+i);
-        return item&&item.$element&&item.$element[0];
-      });
-      // Clay's item.get() reads the actual toggle state, including persisted
-      // clay-settings. Its .on() hooks the manipulator input directly.
-      // Relying on querySelector against Clay's minified $element failed in
-      // some Android webviews, leaving the view permanently unfiltered.
-      function render(){
-        var all=control?!!control.get():!!data.showAllDefault;
-        for(var i=0;i<flags.length;i++){
-          var row=elements[i];
-          if(row)row.classList.toggle('ha-device-filter-hidden',!all&&!flags[i]);
-        }
-      }
-      if(control)control.on('change',render);
-      render();
-    });
-  },{autoHandleEvents:false});
-  clay.meta.userData={
-    showAllDefault:showAllDevices,
-    primaryDeviceFlags:favoriteConfigRows.map(function(r){
-      return r.domain==='light'||r.domain==='fan'||r.domain==='switch'||
-        isFanControl(r);
-    })
-  };
+  // No client-side device type filter: every discovered device is listed,
+  // grouped by room, and can be favorited/hidden independently.
+  clay=new Clay(cfg,null,{autoHandleEvents:false});
   Pebble.openURL(clay.generateUrl());
 }
 function escapeSettingsText(value){
@@ -392,10 +375,6 @@ Pebble.addEventListener('webviewclosed',function(e){
       // One small invalidation instead of retransmitting every room/device.
       Pebble.sendAppMessage({COMMAND:'CTRL_INVALIDATE'},null,function(){});
     }
-  }
-  if(field('SHOW_ALL_DEVICES')!==undefined){
-    showAllDevices=valueBoolean(field('SHOW_ALL_DEVICES'),false);
-    localStorage.setItem('SHOW_ALL_DEVICES',String(showAllDevices));
   }
   if(valueBoolean(field('REFRESH_DEVICES'),false)){
     forceRefreshControls().catch(function(err){
@@ -537,7 +516,7 @@ function controlRow(r,index){
   return {COMMAND:'CTRL_ROW',CTRL_INDEX:index,
     CTRL_NAME:String(r.name||'Device').slice(0,35),
     CTRL_ROOM:String(r.room||'Unassigned').slice(0,21),
-    CTRL_KIND:controlKind(r.domain,r.name),CTRL_FAV:r.favorite?1:0};
+    CTRL_KIND:controlKind(r.domain,r.name,r.id),CTRL_FAV:r.favorite?1:0};
 }
 var controlRows=[];
 function sendCatalog(watchRevision,rows,mode,offset,alwaysSend){
