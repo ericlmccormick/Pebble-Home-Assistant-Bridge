@@ -118,6 +118,6 @@
       }
     ]
   },
-  "version": "1.6.4",
-  "description": "Home Assistant Control Center with all-device settings, deduplicated catalog, device type icons and progressive background status"
+  "version": "1.6.5",
+  "description": "Home Assistant Control Center with contextual, room-relative names that distinguish same-named light and fan devices"
 }
