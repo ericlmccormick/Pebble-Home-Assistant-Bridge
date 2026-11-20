@@ -118,6 +118,6 @@
       }
     ]
   },
-  "version": "1.6.0",
-  "description": "Home Assistant Control Center with unlimited phone device settings, metadata-only watch pagination and on-demand controls"
+  "version": "1.6.1",
+  "description": "Home Assistant Control Center with corrected Lights/Fans device filtering and room header visibility"
 }
