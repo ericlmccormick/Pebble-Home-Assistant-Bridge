@@ -123,5 +123,5 @@
     ]
   },
   "version": "1.7.2",
-  "description": "Home Assistant Control Center with live state, brightness and color subtitles in Normal and Large modes"
+  "description": "Home Assistant Control Center with correct large text baselines and reliable per-device status updates"
 }
