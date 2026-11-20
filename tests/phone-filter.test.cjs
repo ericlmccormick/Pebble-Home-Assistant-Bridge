@@ -79,6 +79,17 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  assert(js.includes('function isLightControl('));
  assert(js.includes("if(isFanControl(row))return 3"));
  assert(js.includes("if(isLightControl(row))return 1"));
+ const kitchenIndex=devices.findIndex(x=>x.label==='Ceiling light');
+ assert(kitchenIndex>=0);
+ const values={};
+ values['DEV_'+kitchenIndex]={value:[true,true]};
+ handlers.webviewclosed({response:encodeURIComponent(JSON.stringify(values))});
+ const savedFav=JSON.parse(store.HA_FAVORITES_V1);
+ const savedHidden=JSON.parse(store.HA_HIDDEN_V1);
+ assert(savedFav.includes('light.kitchen')&&savedFav.includes('light.kitchen_duplicate'),
+   'Favorite setting propagates to both mirrored entity IDs');
+ assert(savedHidden.includes('light.kitchen')&&savedHidden.includes('light.kitchen_duplicate'),
+   'Hide setting prevents a mirrored entity reappearing on the watch');
  assert(!js.includes("SHOW_ALL_DEVICES"));
  console.log('Full settings without toggle, deduplicated IDs/labels, all rooms and type icon classification passed');
 })().catch(e=>{console.error(e);process.exit(1);});
