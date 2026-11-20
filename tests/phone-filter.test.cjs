@@ -9,6 +9,7 @@ const rows=[
  {id:'fan.bedroom',name:'Bedroom fan',room:'Bedroom',domain:'fan'},
  {id:'switch.attic_fan',name:'Attic',room:'Attic',domain:'switch'},
  {id:'switch.desk',name:'Desk',room:'Office',domain:'switch'},
+ {id:'switch.garage_outlet',name:'Garage',room:'Garage',domain:'switch'},
  {id:'scene.movie',name:'Movie',room:'Cinema',domain:'scene'},
  {id:'light.annie_cave_light',name:'Annie Cave',room:'Annie Cave',domain:'light'},
  {id:'fan.annie_cave_fan',name:'Annie Cave',room:'Annie Cave',domain:'fan'},
@@ -47,7 +48,7 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  assert(!sec.items.some(x=>x.messageKey==='SHOW_ALL_DEVICES'),
    'Device type toggle is completely removed');
  const devices=sec.items.filter(x=>x.type==='checkboxgroup');
- assert.strictEqual(devices.length,12,
+ assert.strictEqual(devices.length,13,
    'Repeat entity IDs are removed but separate HA entities remain independent');
  const labels=devices.map(x=>x.label);
  for(const name of ['Ceiling light','Ceiling fixture','Fan','Switch','Desk','Movie','Light','Lamp','Guest Fan','flood lights'])
