@@ -121,6 +121,6 @@
       }
     ]
   },
-  "version": "1.7.0",
-  "description": "Home Assistant Control Center with compact large-mode rows, direct voice launch, and visible room headers"
+  "version": "1.7.1",
+  "description": "Home Assistant Control Center with aligned large fonts, garage doors and front door locks requiring confirmation"
 }
