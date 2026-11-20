@@ -397,7 +397,7 @@ static void visible_rebuild(void){
 }
 static bool catalog_refresh_due(void){
   time_t now=time(NULL);
-  return s_catalog_revision==0||s_last_sync_at==0||now<s_last_sync_at||
+  return s_cached_mode!=s_mode||s_catalog_revision==0||s_last_sync_at==0||now<s_last_sync_at||
     (now-s_last_sync_at)>=CACHE_REFRESH_SECONDS;
 }
 static void catalog_request_if_due(void){
@@ -617,6 +617,10 @@ void controls_open_mode(int mode){
   if(s_list)return;
   catalog_restore();
   s_mode=mode;
+  if(s_cached_mode!=mode){
+    s_count=0;s_page_offset=0;s_request_offset=0;s_has_more=false;
+    s_catalog_revision=0;
+  }else s_request_offset=s_page_offset;
   s_loading=s_count==0;
   visible_rebuild();
   rooms_rebuild();
@@ -887,25 +891,31 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     }
     return;
   }
+  if(strcmp(command,"CTRL_DETAIL_OPEN")==0){
+    Tuple *i=dict_find(iter,MESSAGE_KEY_CTRL_INDEX);
+    int index=i?i->value->int32:-1;
+    if(index>=0&&index<s_count)detail_push(index,false);
+    return;
+  }
   if(strcmp(command,"CTRL_ROW")==0){
     Tuple *i=dict_find(iter,MESSAGE_KEY_CTRL_INDEX);
     Tuple *n=dict_find(iter,MESSAGE_KEY_CTRL_NAME);
-    Tuple *st=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
     Tuple *room=dict_find(iter,MESSAGE_KEY_CTRL_ROOM);
     Tuple *kind=dict_find(iter,MESSAGE_KEY_CTRL_KIND);
     Tuple *fav=dict_find(iter,MESSAGE_KEY_CTRL_FAV);
-    Tuple *advanced=dict_find(iter,MESSAGE_KEY_CTRL_ADVANCED);
-    if(!i||!n||!st)return;
+    if(!i||!n)return;
     int index=i->value->int32;
     if(index<0||index>=PAGE_SIZE)return;
-    snprintf(s_rows[index].name,sizeof(s_rows[index].name),"%s",n->value->cstring);
-    snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
-    snprintf(s_rows[index].room,sizeof(s_rows[index].room),"%s",room?room->value->cstring:"Unassigned");
-    s_rows[index].kind=kind?(uint8_t)kind->value->int32:0;
-    s_rows[index].favorite=fav?fav->value->int32!=0:false;
-    s_rows[index].advanced=advanced?advanced->value->int32!=0:false;
-    if(index>=s_count)s_count=index+1;
-    s_catalog_dirty=true;
+    if(!s_received_rows){
+      memset(s_incoming,0,sizeof(s_incoming));
+      s_incoming_count=0;s_received_rows=true;
+    }
+    if(!s_incoming[index].name[0])s_incoming_count++;
+    snprintf(s_incoming[index].name,sizeof(s_incoming[index].name),"%s",n->value->cstring);
+    snprintf(s_incoming[index].room,sizeof(s_incoming[index].room),"%s",
+      room?room->value->cstring:"Unassigned");
+    s_incoming[index].kind=kind?(uint8_t)kind->value->int32:0;
+    s_incoming[index].favorite=fav?fav->value->int32!=0:false;
     return;
   }
   if(strcmp(command,"CTRL_STATE")==0){
@@ -914,38 +924,56 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     if(!i||!st)return;
     int index=i->value->int32;
     if(index<0||index>=s_count)return;
-    if(strcmp(s_rows[index].state,st->value->cstring)!=0){
-      snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
-      catalog_store_status(index);
-      if(s_menu)menu_layer_reload_data(s_menu);
-    }
+    snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
+    // No persistence: a live state may already be stale at the next launch.
+    if(s_menu)menu_layer_reload_data(s_menu);
     return;
   }
   if(strcmp(command,"CTRL_DONE")==0){
     Tuple *count=dict_find(iter,MESSAGE_KEY_CTRL_TOTAL);
     Tuple *rev=dict_find(iter,MESSAGE_KEY_CTRL_REV);
-    if(count&&rev){
-      int n=count->value->int32;
-      if(n<0||n>PAGE_SIZE)return;
-      bool changed=s_catalog_dirty||n!=s_count;
-      s_count=n;
-      s_catalog_revision=rev->value->int32;
-      s_last_sync_at=time(NULL);
-      if(changed){
-        if(!catalog_store()){
-          s_catalog_revision=0;
-          persist_write_int(CACHE_REV_KEY,0);
-        }
-      }else{
-        persist_write_int(CACHE_REV_KEY,s_catalog_revision);
-        persist_write_int(CACHE_STAMP_KEY,(int)s_last_sync_at);
-      }
-      s_catalog_dirty=false;
+    Tuple *offset=dict_find(iter,MESSAGE_KEY_CTRL_OFFSET);
+    Tuple *total=dict_find(iter,MESSAGE_KEY_CTRL_GRAND_TOTAL);
+    Tuple *more=dict_find(iter,MESSAGE_KEY_CTRL_HAS_MORE);
+    if(!count||!rev)return;
+    int n=count->value->int32;
+    if(n<0||n>PAGE_SIZE)return;
+    if(s_received_rows&&s_incoming_count!=n){
+      s_sync_pending=false;s_received_rows=false;
+      snprintf(s_hint_text,sizeof(s_hint_text),"Incomplete page; retry");
+      if(s_hint)text_layer_set_text(s_hint,s_hint_text);
+      return;
     }
-    s_loading=false;s_sync_pending=false;
+    bool page_changed=s_received_rows||n!=s_count||
+      (offset&&offset->value->int32!=s_page_offset)||
+      s_cached_mode!=s_mode;
+    if(page_changed){
+      if(s_received_rows)memcpy(s_rows,s_incoming,n*sizeof(ControlRow));
+      else memset(s_rows,0,sizeof(s_rows));
+      s_count=n;
+    }
+    s_received_rows=false;s_incoming_count=0;
+    s_page_offset=offset?offset->value->int32:s_request_offset;
+    if(s_page_offset<0)s_page_offset=0;
+    s_request_offset=s_page_offset;
+    s_cached_mode=s_mode;
+    s_has_more=more&&more->value->int32!=0;
+    s_total_count=total?total->value->int32:s_count;
+    s_catalog_revision=rev->value->int32;
+    s_last_sync_at=time(NULL);
+    if(page_changed){
+      if(!catalog_store()){
+        s_catalog_revision=0;
+        persist_write_int(CACHE_REV_KEY,0);
+      }
+    }else{
+      persist_write_int(CACHE_REV_KEY,s_catalog_revision);
+      persist_write_int(CACHE_STAMP_KEY,(int)s_last_sync_at);
+    }
+    s_loading=false;s_sync_pending=false;s_received_rows=false;
     if(s_force_refresh_pending){
       s_force_refresh_pending=false;
-      snprintf(s_refresh_note,sizeof(s_refresh_note),"Updated: %d devices",s_count);
+      snprintf(s_refresh_note,sizeof(s_refresh_note),"Found %d total devices",s_total_count);
       if(s_settings_menu)menu_layer_reload_data(s_settings_menu);
     }
     visible_rebuild();
