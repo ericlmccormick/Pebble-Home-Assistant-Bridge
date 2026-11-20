@@ -22,6 +22,8 @@ jobs:
         run: node tests/sentence-prefetch.test.cjs
       - name: Day and night text, icon and selection contrast
         run: node tests/theme-contrast.test.cjs
+      - name: Large font and live status rendering regression
+        run: node tests/status-layout.test.cjs
       - name: Font alignment and confirmed door controls
         run: node tests/door-ui.test.cjs
       - name: Home layout and navigation regression
