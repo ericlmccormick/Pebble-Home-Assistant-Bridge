@@ -197,7 +197,7 @@ function fetchControlsIfStale(force){
 function isFanControl(row){
   return row&&(
     row.domain==='fan'||
-    (row.domain==='switch'&&/\\b(fan|ventilator|exhaust|air.handler)\\b/i.test(String(row.name||row.id||'')))
+    (row.domain==='switch'&&/\b(fan|ventilator|exhaust|air.handler)\b/i.test(String(row.name||row.id||'')))
   );
 }
 function controlKind(domain,name){
