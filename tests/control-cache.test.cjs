@@ -6,9 +6,9 @@ const JS=fs.readFileSync('src/pkjs/index.js','utf8');
 const C=fs.readFileSync('src/c/ha_controls.c','utf8');
 const manifest=require('../package.json');
 const rows=[
-  {id:'light.kitchen',name:'Kitchen Lamp',room:'Kitchen',domain:'light',state:'off'},
-  {id:'scene.evening',name:'Evening Lights',room:'Living Room',domain:'scene',state:'off'},
-  {id:'script.relax',name:'Relax',room:'Living Room',domain:'script',state:'off'}
+  {id:'light.kitchen',name:'Kitchen Lamp',room:'Kitchen',domain:'light',state:'off',advanced:false},
+  {id:'scene.evening',name:'Evening Lights',room:'Living Room',domain:'scene',state:'off',advanced:false},
+  {id:'script.relax',name:'Relax',room:'Living Room',domain:'script',state:'off',advanced:false}
 ];
 function harness(storage){
   let handlers={},outgoing=[],invoked=[],opened=[],sourceTimeout=[],configs=[];
@@ -24,7 +24,10 @@ function harness(storage){
     sendAppMessage:(message,ok,err)=>{outgoing.push(message);if(ok)ok();},
     invokeAction:({action,args})=>{
       invoked.push({action,args});
-      if(action==='list_controls')return Promise.resolve({ok:true,text:JSON.stringify(rows)});
+      if(action==='list_controls'){
+        const offset=Number(args.offset)||0;
+        return Promise.resolve({ok:true,text:JSON.stringify(rows.slice(offset,offset+48))});
+      }
       if(action==='control_entity')return Promise.resolve({ok:true,text:'{}'});
       if(action==='get_state')return Promise.resolve({ok:true,text:JSON.stringify({state:'on'})});
       throw Error('Unexpected plugin action '+action);
@@ -154,5 +157,25 @@ async function flush(){for(let i=0;i<9;i++)await new Promise(resolve=>setImmedia
   assert(C.includes('home_title_top()'));
   for(const key of ['CTRL_REV','CTRL_TOTAL'])
     assert(manifest.pebble.messageKeys.includes(key));
-  console.log('Catalog caching, no-repeat Bluetooth transport, JS restart, actions and hide/favorites passed');
+  // More than 48 Home Assistant entities: the plugin pages discovery
+  // and the watch catalog prioritizes otherwise-hidden fan entities.
+  rows.length=0;
+  for(let i=0;i<55;i++)rows.push({
+    id:'switch.generic_'+i,name:'Generic '+i,room:'Zone',
+    domain:'switch',state:'off',advanced:false
+  });
+  rows.push({id:'fan.living_room',name:'Living Room Fan',room:'Living Room',
+    domain:'fan',state:'on',advanced:true});
+  const paged=harness({});
+  paged.fire({COMMAND:'CTRL_REQUEST',CTRL_REV:0});
+  await flush();
+  const listCalls=paged.invoked.filter(x=>x.action==='list_controls');
+  assert.strictEqual(listCalls.length,2,'Fetch second 48-entity page');
+  assert.strictEqual(listCalls[1].args.offset,48);
+  assert(paged.outgoing.some(x=>x.COMMAND==='CTRL_ROW'&&
+    x.CTRL_NAME==='Living Room Fan'&&x.CTRL_KIND===3&&x.CTRL_ADVANCED===1),
+    'Fan after first 48 items must be visible and marked adjustable');
+  assert.strictEqual(paged.outgoing.filter(x=>x.COMMAND==='CTRL_ROW').length,48,
+    'Watch catalog retains its bounded memory footprint');
+    console.log('Catalog caching, no-repeat Bluetooth transport, JS restart, actions and hide/favorites passed');
 })().catch(e=>{console.error(e);process.exit(1);});
