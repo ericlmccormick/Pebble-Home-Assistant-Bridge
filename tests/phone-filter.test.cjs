@@ -49,7 +49,7 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  assert(!sec.items.some(x=>x.messageKey==='SHOW_ALL_DEVICES'),
    'Device type toggle is completely removed');
  const devices=sec.items.filter(x=>x.type==='checkboxgroup');
- assert.strictEqual(devices.length,11,
+ assert.strictEqual(devices.length,12,
    'Exact IDs, mirrored same-type names, and relay-backed lights are consolidated');
  const labels=devices.map(x=>x.label);
  for(const name of ['Ceiling light','Ceiling fixture','Fan','Switch','Desk','Movie','Light','Lamp','Guest Fan','flood lights'])
