@@ -878,10 +878,10 @@ void controls_receive(DictionaryIterator *iter,const char *command){
     if(index<0||index>=s_count)return;
     if(strcmp(s_rows[index].state,st->value->cstring)!=0){
       snprintf(s_rows[index].state,sizeof(s_rows[index].state),"%s",st->value->cstring);
-      catalog_store_status(index);
       if(s_menu)menu_layer_reload_data(s_menu);
     }
     if(index==s_detail_index){
+      s_rows[index].advanced=adj&&adj->value->int32!=0;
       s_detail_level=level?level->value->int32:-1;
       if(s_detail_level>100)s_detail_level=100;
       if(s_detail_level<0)s_detail_level=-1;
