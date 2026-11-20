@@ -280,43 +280,47 @@ function configureWithDevices(rows){
   // Hide non-light/fan options by default without removing them from the
   // form; this keeps every favorite/hide choice intact across filter changes.
   // Clay's AFTER_BUILD event fires after the HTML controls are in the DOM.
+  // Clay serializes this callback into a separate HTML webview. It cannot
+  // capture PebbleKit JS variables. Transfer only non-sensitive visibility
+  // flags and room ranges through Clay's embedded page metadata.
   clay=new Clay(cfg,function(){
     var page=this;
     page.on(page.EVENTS.AFTER_BUILD,function(){
+      var settings=page.meta.userData||{};
+      var visible=settings.lightFanFlags||[],groups=settings.roomGroups||[];
       var item=page.getItemByMessageKey('SHOW_ALL_DEVICES');
       var root=item&&item.$element&&item.$element[0];
       var toggle=root&&root.querySelector('input');
       var elements=document.querySelectorAll('.component-checkbox');
-      if(!toggle||elements.length<favoriteConfigRows.length)return;
-      function renderFilter(){
-        // Only the device groups are checkboxgroup components in this page.
-        for(var i=0;i<favoriteConfigRows.length;i++){
-          var r=favoriteConfigRows[i];
-          elements[i].style.display=toggle.checked||isFanControl(r)||
-            r.domain==='light'?'':'none';
-        }
-      }
-      roomConfigGroups.forEach(function(group){
+      if(!toggle||elements.length<visible.length)return;
+      groups.forEach(function(group){
         var heading=page.getItemById(group.id);
         group.element=heading&&heading.$element&&heading.$element[0];
       });
-      function renderRoomHeaders(){
-        roomConfigGroups.forEach(function(group){
+      function render(){
+        for(var i=0;i<visible.length;i++)
+          elements[i].style.display=toggle.checked||visible[i]?'':'none';
+        groups.forEach(function(group){
           if(!group.element)return;
           var any=false;
           for(var j=group.start;j<group.start+group.count;j++){
-            var row=favoriteConfigRows[j];
-            if(isFanControl(row)||row.domain==='light'){any=true;break;}
+            if(visible[j]){any=true;break;}
           }
           group.element.style.display=toggle.checked||any?'':'none';
         });
       }
-      toggle.addEventListener('change',function(){
-        renderFilter();renderRoomHeaders();
-      });
-      renderFilter();renderRoomHeaders();
+      toggle.addEventListener('change',render);
+      render();
     });
   },{autoHandleEvents:false});
+  clay.meta.userData={
+    lightFanFlags:favoriteConfigRows.map(function(r){
+      return r.domain==='light'||isFanControl(r);
+    }),
+    roomGroups:roomConfigGroups.map(function(group){
+      return {id:group.id,start:group.start,count:group.count};
+    })
+  };
   Pebble.openURL(clay.generateUrl());
 }
 function escapeSettingsText(value){
