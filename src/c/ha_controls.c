@@ -168,13 +168,20 @@ static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,con
   // Non-toggle items keep their original full-color category badge.
   // Metadata-only pages arrive before live status. Treat an empty state
   // as unknown: never imply a device is ON before it has been checked.
-  bool dimmed=state&&(!state[0]||strcmp(state,"off")==0||
-    strcmp(state,"unavailable")==0||strcmp(state,"unknown")==0);
-  GColor ink=dimmed?(highlighted?ui_selected_fg():ui_muted()):badge_ink(highlighted);
+  bool unknown=!state||!state[0]||strcmp(state,"unknown")==0;
+  bool dimmed=state&&(strcmp(state,"off")==0||
+    strcmp(state,"unavailable")==0);
+  // Unknown status is NOT an unknown device type. Draw the distinctive
+  // lightbulb, fan blades, switch or scene glyph immediately in its category
+  // color, using an unfilled ring until status is known.
+  GColor category=kind_color(kind);
+  GColor ink=unknown?(highlighted?ui_selected_fg():category):
+    dimmed?(highlighted?ui_selected_fg():ui_muted()):badge_ink(highlighted);
   graphics_context_set_fill_color(ctx,
-    dimmed?(highlighted?ui_selected_bg():ui_bg()):badge_fill(kind,highlighted));
+    (unknown||dimmed)?(highlighted?ui_selected_bg():ui_bg()):badge_fill(kind,highlighted));
   graphics_fill_circle(ctx,c,14);
-  graphics_context_set_stroke_color(ctx,dimmed?(highlighted?ui_selected_fg():ui_muted()):
+  graphics_context_set_stroke_color(ctx,unknown?(highlighted?ui_selected_fg():category):
+    dimmed?(highlighted?ui_selected_fg():ui_muted()):
     (highlighted?ui_selected_fg():ui_fg()));
   graphics_context_set_stroke_width(ctx,1);
   graphics_draw_circle(ctx,c,14);
