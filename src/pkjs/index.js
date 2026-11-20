@@ -247,8 +247,8 @@ function displayDeviceName(row){
   }
   if(!tail){
     var domain=String(row.domain||'').toLowerCase();
-    if(domain==='fan')return 'Fan';
-    if(domain==='light')return 'Light';
+    if(isFanControl(row))return 'Fan';
+    if(isLightControl(row))return 'Light';
     if(domain==='switch')return 'Switch';
     if(domain==='input_boolean')return 'Toggle';
     if(domain==='cover')return 'Cover';
@@ -267,20 +267,9 @@ function deduplicateControls(rows){
     if(!byId[id]){byId[id]=r;keys.push(id);}
     else if(favorites.indexOf(r.id)>=0)byId[id]=r;
   });
-  // Mirrored HA entities sometimes have different IDs but exactly the same
-  // label, room and domain. Display one representative; keep independently
-  // named entities (and different domains) separate.
-  var byLabel={},order=[];
-  keys.forEach(function(id){
-    var r=byId[id];
-    var label=String(r.room||'Unassigned').toLowerCase().trim()+'|'+
-      String(r.name||r.id).toLowerCase().trim()+'|'+
-      String(r.domain||'').toLowerCase();
-    if(!byLabel[label]){byLabel[label]=r;order.push(label);}
-    else if(favorites.indexOf(r.id)>=0&&favorites.indexOf(byLabel[label].id)<0)
-      byLabel[label]=r;
-  });
-  return order.map(function(k){return byLabel[k];});
+  // Different HA entity IDs are independently controllable, even if they
+  // share friendly_name and domain. Do not silently merge them.
+  return keys.map(function(key){return byId[key];});
 }
 function configureWithDevices(rows){
   var cfg=clayConfig.slice();
