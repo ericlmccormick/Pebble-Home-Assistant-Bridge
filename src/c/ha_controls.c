@@ -440,15 +440,6 @@ static void visible_rebuild(void){
     if(include)s_visible[s_visible_count++]=(uint8_t)i;
   }
 }
-static bool catalog_refresh_due(void){
-  time_t now=time(NULL);
-  return s_cached_mode!=s_mode||s_catalog_revision==0||s_last_sync_at==0||now<s_last_sync_at||
-    (now-s_last_sync_at)>=CACHE_REFRESH_SECONDS;
-}
-static void catalog_request_if_due(void){
-  if(s_sync_pending||!catalog_refresh_due())return;
-  s_sync_pending=send_command("CTRL_REQUEST",s_mode);
-}
 static uint16_t num_sections(MenuLayer *m,void *data){
   return base_sections()+(s_page_offset>0?1:0)+(s_has_more?1:0);
 }
