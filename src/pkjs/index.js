@@ -141,6 +141,9 @@ var favoriteConfigRows=[];
 var CATALOG_CACHE_KEY='HA_CONTROLS_CACHE_V1';
 var CATALOG_FETCH_AT_KEY='HA_CONTROLS_FETCHED_AT_V2';
 var CATALOG_TTL_MS=60*60*1000;
+var PAGE_SIZE=32;
+var showAllDevices=localStorage.getItem('SHOW_ALL_DEVICES')==='true';
+var currentWatchMode=0,currentWatchOffset=0;
 var catalogPromise=null;
 function storedIds(key){
   try {
@@ -163,13 +166,12 @@ function saveCachedControls(rows){
 function fetchControlsIfStale(force){
   var cached=getCachedControls();
   var age=Date.now()-Number(localStorage.getItem(CATALOG_FETCH_AT_KEY)||0);
-  if(!force&&cached.length&&cached.every(function(r){return typeof r.advanced==='boolean';})&&
-    age>=0&&age<CATALOG_TTL_MS)return Promise.resolve(cached);
+  if(!force&&cached.length&&age>=0&&age<CATALOG_TTL_MS)return Promise.resolve(cached);
   if(catalogPromise)return catalogPromise;
-  // Plugin pages are 48 entities so large HA installations do not silently
-  // lose fans past the first page. Stop at 240 entities to bound phone memory.
+  // Retrieve all 48-entity Bridge discovery pages. Only a finite page
+  // is transmitted to the watch; the phone catalog has no device cap.
   function getPage(offset,all,seen){
-    return pluginAction('list_controls',{offset:offset}).then(function(result){
+    return pluginAction('list_controls',{offset:offset,metadata_only:true}).then(function(result){
       var page=pluginJson(result);
       if(!Array.isArray(page))throw Error('Bridge returned no controllable entities');
       var added=0;
@@ -179,14 +181,14 @@ function fetchControlsIfStale(force){
         }
       });
       // Older plugin versions ignore offset and repeat the first page.
-      if(page.length===48&&added>0&&offset+48<960)
+      if(page.length===48&&added>0)
         return getPage(offset+48,all,seen);
       return all;
     });
   }
   catalogPromise=getPage(0,[],{}).then(function(rows){
-    saveCachedControls(rows);
-    return rows;
+    saveCachedControls(rows.map(function(r){return {id:r.id,name:r.name,room:r.room,domain:r.domain};}));
+    return getCachedControls();
   }).then(function(rows){catalogPromise=null;return rows;},function(err){
     catalogPromise=null;
     if(!force&&cached.length){console.log('Using cached controls: '+String(err&&err.message||err));return cached;}
@@ -212,20 +214,19 @@ function displayState(row){
 function configureWithDevices(rows){
   var cfg=clayConfig.slice();
   var favorites=favoriteIds(),hidden=hiddenIds();
-  // Settings has 48 reserved checkbox groups. Ensure fans and saved
-  // favorites remain selectable even when a home has more devices.
+  // Clay serializes dynamically named checkboxes on the phone. Their keys
+  // are deliberately not sent as Pebble AppMessages, so they do not require
+  // a finite, predeclared set in the PBW manifest.
   favoriteConfigRows=rows.slice().sort(function(a,b){
-    var pa=favorites.indexOf(a.id)>=0?0:a.domain==='fan'?1:2;
-    var pb=favorites.indexOf(b.id)>=0?0:b.domain==='fan'?1:2;
-    return pa-pb||String(a.room||'').localeCompare(String(b.room||''))||
-      String(a.name||'').localeCompare(String(b.name||''));
-  }).slice(0,48).sort(function(a,b){
     return String(a.room||'').localeCompare(String(b.room||''))||
-      String(a.name||'').localeCompare(String(b.name||''));
+      String(a.name||'').localeCompare(String(b.name||''))||
+      String(a.id||'').localeCompare(String(b.id||''));
   });
   var items=[
     {type:'heading',defaultValue:'Watch devices'},
     {type:'text',defaultValue:'Tap the star to favorite or the crossed circle to hide. Hidden favorites remain saved.'},
+    {type:'toggle',messageKey:'SHOW_ALL_DEVICES',label:'Show all device types',
+      defaultValue:showAllDevices},
     {type:'toggle',messageKey:'REFRESH_DEVICES',label:'Force recheck now (Bridge)',
       defaultValue:false},
     // Keep the actual Clay checkbox inputs. Only restyle their two visible
@@ -257,9 +258,8 @@ function configureWithDevices(rows){
       previousRoom=room;
       items.push({type:'heading',defaultValue:room.slice(0,36)});
     }
-    // Native Clay checkbox group: a single device row with two independent
-    // options. The DEV_i[2] app-message keys are reserved in package.json;
-    // values are intercepted on webviewclosed and never sent to the watch.
+    // Native Clay checkbox groups are serialized by the phone configuration
+    // page. They do not use Pebble AppMessage keys or a finite 48-item list.
     items.push({
       type:'checkboxgroup',
       messageKey:'DEV_'+i,
@@ -272,7 +272,29 @@ function configureWithDevices(rows){
     items.push({type:'text',defaultValue:'No cached devices yet. Open Devices by Room on the watch, then reopen Settings.'});
   // Display and Bridge first, then the grouped per-device controls.
   cfg.splice(cfg.length-1,0,{type:'section',items:items});
-  clay=new Clay(cfg,null,{autoHandleEvents:false});
+  // Hide non-light/fan options by default without removing them from the
+  // form; this keeps every favorite/hide choice intact across filter changes.
+  // Clay's AFTER_BUILD event fires after the HTML controls are in the DOM.
+  clay=new Clay(cfg,function(){
+    var page=this;
+    page.on(page.EVENTS.AFTER_BUILD,function(){
+      var item=page.getItemByMessageKey('SHOW_ALL_DEVICES');
+      var root=item&&item.$element&&item.$element[0];
+      var toggle=root&&root.querySelector('input');
+      var elements=document.querySelectorAll('.component-checkbox');
+      if(!toggle||elements.length<favoriteConfigRows.length)return;
+      function renderFilter(){
+        // Only the device groups are checkboxgroup components in this page.
+        for(var i=0;i<favoriteConfigRows.length;i++){
+          var r=favoriteConfigRows[i];
+          elements[i].style.display=toggle.checked||isFanControl(r)||
+            r.domain==='light'?'':'none';
+        }
+      }
+      toggle.addEventListener('change',renderFilter);
+      renderFilter();
+    });
+  },{autoHandleEvents:false});
   Pebble.openURL(clay.generateUrl());
 }
 function escapeSettingsText(value){
@@ -340,6 +362,10 @@ Pebble.addEventListener('webviewclosed',function(e){
       // One small invalidation instead of retransmitting every room/device.
       Pebble.sendAppMessage({COMMAND:'CTRL_INVALIDATE'},null,function(){});
     }
+  }
+  if(field('SHOW_ALL_DEVICES')!==undefined){
+    showAllDevices=valueBoolean(field('SHOW_ALL_DEVICES'),false);
+    localStorage.setItem('SHOW_ALL_DEVICES',String(showAllDevices));
   }
   if(valueBoolean(field('REFRESH_DEVICES'),false)){
     forceRefreshControls().catch(function(err){
