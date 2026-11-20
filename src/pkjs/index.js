@@ -142,6 +142,14 @@ var favoriteConfigRows=[];
 var CATALOG_CACHE_KEY='HA_CONTROLS_CACHE_V1';
 var CATALOG_FETCH_AT_KEY='HA_CONTROLS_FETCHED_AT_V2';
 var CATALOG_TTL_MS=60*60*1000;
+var ROOM_CACHE_FORMAT_KEY='HA_ROOM_CACHE_FORMAT';
+if(localStorage.getItem(ROOM_CACHE_FORMAT_KEY)!=='json_rooms_v2'){
+  // Old Bridge metadata could incorrectly assign every device to Unassigned.
+  // Clear only the catalog; retain Favorite/Hide and other user preferences.
+  localStorage.removeItem('HA_CONTROLS_CACHE_V1');
+  localStorage.removeItem('HA_CONTROLS_FETCHED_AT_V2');
+  localStorage.setItem(ROOM_CACHE_FORMAT_KEY,'json_rooms_v2');
+}
 var PAGE_SIZE=32;
 var showAllDevices=localStorage.getItem('SHOW_ALL_DEVICES')==='true';
 var currentWatchMode=0,currentWatchOffset=0;
