@@ -35,12 +35,13 @@ static char s_rooms[CONTROL_MAX][ROOM_LEN];
 static uint8_t s_room_sizes[CONTROL_MAX];
 static uint8_t s_room_starts[CONTROL_MAX];
 static bool s_loading=false;
-static Window *s_home=NULL,*s_list=NULL,*s_detail_window=NULL;
+static Window *s_home=NULL,*s_list=NULL,*s_detail_window=NULL,*s_settings_window=NULL,*s_volume_window=NULL;
+static Layer *s_volume_settings_layer=NULL;
 static Layer *s_detail_layer=NULL;
 static int s_detail_index=-1,s_detail_level=-1;
 static bool s_detail_adjustable=false,s_detail_busy=false,s_detail_loading=false;
 static char s_detail_note[42]="";
-static MenuLayer *s_home_menu=NULL,*s_menu=NULL;
+static MenuLayer *s_home_menu=NULL,*s_menu=NULL,*s_settings_menu=NULL;
 static TextLayer *s_hint=NULL;
 static char s_hint_text[64]="Select: toggle or run";
 static int32_t s_catalog_revision=0;
@@ -49,6 +50,16 @@ static bool s_catalog_loaded=false,s_sync_pending=false,s_catalog_dirty=false;
 
 static bool s_large_text=false;
 static bool s_night_theme=false;
+static int s_theme_mode=2; // 0 day, 1 night, 2 automatic sunset via Weather+
+static bool s_force_refresh_pending=false;
+static char s_refresh_note[40]="Full device discovery";
+int controls_voice_volume_percent(void);
+void controls_voice_volume_change(int direction);
+void controls_set_theme_mode(int theme_mode){
+  if(theme_mode<0||theme_mode>2)return;
+  s_theme_mode=theme_mode;
+  if(s_settings_menu)menu_layer_reload_data(s_settings_menu);
+}
 static GColor ui_bg(void){return s_night_theme?GColorBlack:GColorWhite;}
 static GColor ui_fg(void){return s_night_theme?GColorWhite:GColorBlack;}
 static GColor ui_muted(void){return s_night_theme?PBL_IF_COLOR_ELSE(GColorLightGray,GColorWhite):PBL_IF_COLOR_ELSE(GColorDarkGray,GColorBlack);}
@@ -77,6 +88,9 @@ void controls_apply_settings(bool large,bool dark){
   s_large_text=large;s_night_theme=dark;
   refresh_menu(s_home_menu,s_home);
   refresh_menu(s_menu,s_list);
+  refresh_menu(s_settings_menu,s_settings_window);
+  if(s_volume_window)window_set_background_color(s_volume_window,ui_bg());
+  if(s_volume_settings_layer)layer_mark_dirty(s_volume_settings_layer);
   if(s_detail_window)window_set_background_color(s_detail_window,ui_bg());
   if(s_detail_layer)layer_mark_dirty(s_detail_layer);
   if(s_hint){
@@ -197,6 +211,14 @@ static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,con
       graphics_draw_line(ctx,GPoint(c.x-10,c.y),GPoint(c.x+10,c.y));
       graphics_draw_line(ctx,GPoint(c.x-6,c.y-6),GPoint(c.x+6,c.y+6));
       graphics_draw_line(ctx,GPoint(c.x+6,c.y-6),GPoint(c.x-6,c.y+6));
+      break;
+    case 12: // settings cog: eight rays around a center
+      graphics_draw_circle(ctx,c,7);
+      graphics_fill_circle(ctx,c,3);
+      graphics_draw_line(ctx,GPoint(c.x-11,c.y),GPoint(c.x-7,c.y));
+      graphics_draw_line(ctx,GPoint(c.x+7,c.y),GPoint(c.x+11,c.y));
+      graphics_draw_line(ctx,GPoint(c.x,c.y-11),GPoint(c.x,c.y-7));
+      graphics_draw_line(ctx,GPoint(c.x,c.y+7),GPoint(c.x,c.y+11));
       break;
     case 10: // house outline
       graphics_draw_line(ctx,GPoint(c.x-10,c.y-1),GPoint(c.x,c.y-10));
@@ -523,8 +545,161 @@ void controls_start_voice(void);
 static void home_back_handler(ClickRecognizerRef recognizer,void *context){
   window_stack_pop_all(true);
 }
-static const char *home_names[]={"Voice Assistant","Favorites","Devices by Room","Scenes & Scripts"};
-static const char *home_subs[]={"Dictation and conversation","Your pinned controls","Browse Home Assistant","Run saved actions"};
+// Settings is native to the watch; only changed preferences and explicit
+// refresh requests are sent to the phone. Local volume uses voice mixer.
+static const char *settings_names[]={
+  "Theme","Text size","Voice volume","Force recheck"
+};
+static uint16_t settings_rows(MenuLayer *menu,uint16_t section,void *ctx){return 4;}
+static int16_t settings_height(MenuLayer *menu,MenuIndex *idx,void *ctx){
+  return s_large_text?75:57;
+}
+static void settings_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
+  if(idx->row>=4)return;
+  GRect b=layer_get_bounds(cell);
+  bool selected=menu_cell_layer_is_highlighted(cell);
+  GColor fg=cell_fg(selected);
+  graphics_context_set_text_color(ctx,fg);
+  graphics_draw_text(ctx,settings_names[idx->row],
+    fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_24_BOLD:FONT_KEY_GOTHIC_18_BOLD),
+    GRect(10,3,b.size.w-18,s_large_text?35:26),
+    GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+  char value[40]="";
+  if(idx->row==0)snprintf(value,sizeof(value),"%s",
+    s_theme_mode==0?"Day":s_theme_mode==1?"Night":"Auto (Weather+)");
+  if(idx->row==1)snprintf(value,sizeof(value),"%s",s_large_text?"Large":"Normal");
+  if(idx->row==2){
+    int volume=controls_voice_volume_percent();
+    if(volume<0)snprintf(value,sizeof(value),"Speaker unavailable");
+    else snprintf(value,sizeof(value),"%d%% (Up / Down)",volume);
+  }
+  if(idx->row==3)snprintf(value,sizeof(value),"%s",s_refresh_note);
+  graphics_context_set_text_color(ctx,cell_sub(selected));
+  graphics_draw_text(ctx,value,
+    fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_18:FONT_KEY_GOTHIC_14),
+    GRect(10,s_large_text?39:29,b.size.w-18,s_large_text?29:23),
+    GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+}
+static void volume_settings_draw(Layer *layer,GContext *ctx){
+  GRect b=layer_get_bounds(layer);
+  int volume=controls_voice_volume_percent();
+  graphics_context_set_text_color(ctx,ui_fg());
+  graphics_draw_text(ctx,"Voice volume",
+    fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+    GRect(10,14,b.size.w-20,40),GTextOverflowModeTrailingEllipsis,
+    GTextAlignmentCenter,NULL);
+  char label[24];
+  if(volume<0)snprintf(label,sizeof(label),"No speaker");
+  else snprintf(label,sizeof(label),"%d%%",volume);
+  graphics_draw_text(ctx,label,fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+    GRect(12,b.size.h/2-35,b.size.w-24,46),
+    GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+  if(volume>=0){
+    GRect track=GRect(20,b.size.h/2+24,b.size.w-40,12);
+    graphics_context_set_stroke_color(ctx,ui_fg());
+    graphics_draw_rect(ctx,track);
+    graphics_context_set_fill_color(ctx,ui_fg());
+    graphics_fill_rect(ctx,GRect(track.origin.x+2,track.origin.y+2,
+      (track.size.w-4)*volume/100,track.size.h-4),0,GCornerNone);
+  }
+  graphics_context_set_text_color(ctx,ui_muted());
+  graphics_draw_text(ctx,"UP / DOWN: 10%    BACK: done",
+    fonts_get_system_font(FONT_KEY_GOTHIC_14),
+    GRect(4,b.size.h-31,b.size.w-8,27),
+    GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
+}
+static void volume_settings_step(int direction){
+  controls_voice_volume_change(direction);
+  if(s_volume_settings_layer)layer_mark_dirty(s_volume_settings_layer);
+}
+static void volume_settings_up(ClickRecognizerRef rec,void *ctx){volume_settings_step(1);}
+static void volume_settings_down(ClickRecognizerRef rec,void *ctx){volume_settings_step(-1);}
+static void volume_settings_done(ClickRecognizerRef rec,void *ctx){window_stack_pop(true);}
+static void volume_settings_clicks(void *ctx){
+  window_single_click_subscribe(BUTTON_ID_UP,volume_settings_up);
+  window_single_click_subscribe(BUTTON_ID_DOWN,volume_settings_down);
+  window_single_click_subscribe(BUTTON_ID_SELECT,volume_settings_done);
+}
+static void volume_settings_load(Window *w){
+  window_set_background_color(w,ui_bg());
+  s_volume_settings_layer=layer_create(layer_get_bounds(window_get_root_layer(w)));
+  layer_set_update_proc(s_volume_settings_layer,volume_settings_draw);
+  layer_add_child(window_get_root_layer(w),s_volume_settings_layer);
+}
+static void volume_settings_unload(Window *w){
+  layer_destroy(s_volume_settings_layer);s_volume_settings_layer=NULL;
+  window_destroy(s_volume_window);s_volume_window=NULL;
+  if(s_settings_menu)menu_layer_reload_data(s_settings_menu);
+}
+static void volume_settings_open(void){
+  if(s_volume_window)return;
+  s_volume_window=window_create();
+  window_set_window_handlers(s_volume_window,(WindowHandlers){
+    .load=volume_settings_load,.unload=volume_settings_unload
+  });
+  window_set_click_config_provider(s_volume_window,volume_settings_clicks);
+  window_stack_push(s_volume_window,true);
+}
+static void settings_select(MenuLayer *menu,MenuIndex *idx,void *data){
+  switch(idx->row){
+    case 0:{
+      int next=(s_theme_mode+1)%3;
+      if(!send_command("CTRL_THEME_SET",next))return;
+      controls_set_theme_mode(next);
+      if(next!=2)controls_apply_settings(s_large_text,next==1);
+      break;
+    }
+    case 1:{
+      int next=s_large_text?0:1;
+      if(!send_command("CTRL_FONT_SET",next))return;
+      controls_apply_settings(next!=0,s_night_theme);
+      break;
+    }
+    case 2:volume_settings_open();break;
+    case 3:
+      if(s_force_refresh_pending)return;
+      if(!send_command("CTRL_FORCE_REFRESH",-1)){
+        snprintf(s_refresh_note,sizeof(s_refresh_note),"Phone busy; retry");break;
+      }
+      s_force_refresh_pending=true;
+      s_sync_pending=true;
+      s_catalog_revision=0;
+      persist_write_int(CACHE_REV_KEY,0);
+      snprintf(s_refresh_note,sizeof(s_refresh_note),"Refreshing from Bridge...");
+      break;
+  }
+  if(s_settings_menu)menu_layer_reload_data(s_settings_menu);
+}
+static void settings_load(Window *w){
+  window_set_background_color(w,ui_bg());
+  GRect b=layer_get_bounds(window_get_root_layer(w));
+  s_settings_menu=menu_layer_create(b);
+  menu_layer_set_callbacks(s_settings_menu,NULL,(MenuLayerCallbacks){
+    .get_num_rows=settings_rows,.get_cell_height=settings_height,
+    .draw_row=settings_draw,.select_click=settings_select
+  });
+  menu_layer_set_normal_colors(s_settings_menu,ui_bg(),ui_fg());
+  menu_layer_set_highlight_colors(s_settings_menu,ui_selected_bg(),ui_selected_fg());
+#ifdef PBL_ROUND
+  menu_layer_set_center_focused(s_settings_menu,true);
+#endif
+  menu_layer_set_click_config_onto_window(s_settings_menu,w);
+  layer_add_child(window_get_root_layer(w),menu_layer_get_layer(s_settings_menu));
+}
+static void settings_unload(Window *w){
+  menu_layer_destroy(s_settings_menu);s_settings_menu=NULL;
+  window_destroy(s_settings_window);s_settings_window=NULL;
+}
+static void settings_open(void){
+  if(s_settings_window)return;
+  s_settings_window=window_create();
+  window_set_window_handlers(s_settings_window,(WindowHandlers){
+    .load=settings_load,.unload=settings_unload
+  });
+  window_stack_push(s_settings_window,true);
+}
+static const char *home_names[]={"Voice Assistant","Favorites","Devices by Room","Scenes & Scripts","Settings"};
+static const char *home_subs[]={"Dictation and conversation","Your pinned controls","Browse Home Assistant","Run saved actions","Theme, text, volume, refresh"};
 static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
   bool active=menu_cell_layer_is_highlighted(cell);
@@ -537,13 +712,14 @@ static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   if(!s_large_text)graphics_draw_text(ctx,home_subs[idx->row],sub_font(),
     GRect(x,sub_top(),b.size.w-x-7,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
 }
-static uint16_t home_rows(MenuLayer *m,uint16_t sec,void *ctx){return 4;}
+static uint16_t home_rows(MenuLayer *m,uint16_t sec,void *ctx){return 5;}
 static void home_select(MenuLayer *m,MenuIndex *idx,void *ctx){
   switch(idx->row){
     case 0:window_stack_pop(true);controls_start_voice();break;
     case 1:controls_open_mode(1);break;
     case 2:controls_open_mode(0);break;
     case 3:controls_open_mode(2);break;
+    case 4:settings_open();break;
   }
 }
 static void home_up_click(ClickRecognizerRef recognizer,void *context){
@@ -679,6 +855,11 @@ void controls_receive(DictionaryIterator *iter,const char *command){
       s_catalog_dirty=false;
     }
     s_loading=false;s_sync_pending=false;
+    if(s_force_refresh_pending){
+      s_force_refresh_pending=false;
+      snprintf(s_refresh_note,sizeof(s_refresh_note),"Updated: %d devices",s_count);
+      if(s_settings_menu)menu_layer_reload_data(s_settings_menu);
+    }
     visible_rebuild();
     rooms_rebuild();
     if(s_menu)menu_layer_reload_data(s_menu);
@@ -693,6 +874,11 @@ void controls_receive(DictionaryIterator *iter,const char *command){
   }
   if(strcmp(command,"CTRL_ERROR")==0){
     s_loading=false;s_sync_pending=false;
+    if(s_force_refresh_pending){
+      s_force_refresh_pending=false;
+      snprintf(s_refresh_note,sizeof(s_refresh_note),"Refresh failed; retry");
+      if(s_settings_menu)menu_layer_reload_data(s_settings_menu);
+    }
     Tuple *t=dict_find(iter,MESSAGE_KEY_CTRL_STATUS);
     if(s_detail_window){
       s_detail_busy=false;s_detail_loading=false;
