@@ -108,10 +108,14 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
     'Show All immediately changes visible settings rows');
   assert(JS.includes("r.domain==='light'")&&JS.includes('isFanControl(r)'),
     'The filter includes lights and fan-backed switches');
-  assert(JS.includes('clay.meta.userData={')&&JS.includes('var settings=page.meta.userData||{}'),
+  assert(JS.includes('clay.meta.userData={')&&JS.includes('var data=page.meta.userData||{}'),
     'Lights/Fans metadata survives Clay callback serialization into separate webview');
-  assert(JS.includes("group.element.style.display=toggle.checked||any"),
-    'Empty room titles disappear when filtered');
+  assert(JS.includes('.component-checkbox.ha-device-filter-hidden{display:none!important;}'),
+    'Filtered device rows override the compact layout flex!important rule');
+  assert(JS.includes('.component-heading.ha-room-filter-hidden{display:none!important;}'),
+    'Room headings are filtered independently with the same CSS priority');
+  assert(JS.includes('page.getItemByMessageKey(\'DEV_\'+i)'),
+    'Filter resolves each exact device row instead of relying on DOM list order');
   h.handlers.webviewclosed({response:encodeURIComponent(JSON.stringify({
     SHOW_ALL_DEVICES:{value:true},DEV_96:{value:[true,false]}
   }))});
