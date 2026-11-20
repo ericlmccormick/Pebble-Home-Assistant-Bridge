@@ -241,6 +241,8 @@ function controlKind(domain,name,id){
   var row={domain:domain,name:name,id:id};
   if(isFanControl(row))return 3;
   if(isLightControl(row))return 1;
+  if(domain==='lock')return 13;
+  if(domain==='cover'&&/(garage|door)/i.test(String(name||'')+' '+String(id||'')))return 14;
   return {switch:2,input_boolean:2,cover:4,scene:5,script:6,automation:7}[domain]||0;
 }
 function isRunAction(domain){return /^(scene|script|automation)$/.test(String(domain||''));}
@@ -268,7 +270,8 @@ function displayDeviceName(row){
     if(isLightControl(row))return 'Light';
     if(domain==='switch')return 'Switch';
     if(domain==='input_boolean')return 'Toggle';
-    if(domain==='cover')return 'Cover';
+    if(domain==='cover')return /garage|door/i.test(String(row.id))?'Garage Door':'Cover';
+    if(domain==='lock')return 'Lock';
     if(domain==='scene')return 'Scene';
     if(domain==='script')return 'Script';
     if(domain==='automation')return 'Automation';
@@ -821,7 +824,7 @@ function controlInspect(index){
   // One get_state only on interaction, not N lookups per device/room page.
   pluginAction('get_state',{entity_id:item.id}).then(function(result){
     var fresh=pluginJson(result),meta=detailMeta(fresh,item.row.domain);
-    if(meta.adjustable){
+    if(meta.adjustable||item.row.domain==='lock'||item.row.domain==='cover'){
       controlSend({COMMAND:'CTRL_DETAIL_OPEN',CTRL_INDEX:index},function(ok){
         if(ok)syncFreshState(index,item.row,fresh,false);
       });
@@ -868,6 +871,20 @@ function controlAdjust(index,direction){
     return pluginAction('get_state',{entity_id:item.id});
   }).then(function(result){
     if(result)syncFreshState(index,item.row,pluginJson(result),true);
+  }).catch(function(err){
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
+  });
+}
+function controlSecureAct(index){
+  var item=controlAt(index);
+  if(!item||!/^(lock|cover)$/.test(item.row.domain))return;
+  pluginAction('secure_control',{entity_id:item.id}).then(function(result){
+    pluginJson(result);
+    return pluginAction('get_state',{entity_id:item.id});
+  }).then(function(result){
+    // The command may take a few seconds to move a garage door. Report
+    // the observed state, not a promise that it is already fully open.
+    syncFreshState(index,item.row,pluginJson(result),true);
   }).catch(function(err){
     controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
   });
@@ -919,6 +936,7 @@ Pebble.addEventListener('appmessage',function(event){
     localStorage.setItem('FONT_SIZE',String(fontChoice==='large'?28:24));
     sendWatchSettings(false);return;
   }
+  if(d.COMMAND==='CTRL_SECURE_ACT'){controlSecureAct(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND==='CTRL_ACT'){controlAct(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND==='CTRL_DETAILS'){controlDetails(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND==='CTRL_ADJUST'){controlAdjust(Number(d.CTRL_INDEX),Number(d.CTRL_DIRECTION));return;}
