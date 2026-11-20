@@ -118,6 +118,6 @@
       }
     ]
   },
-  "version": "1.6.1",
-  "description": "Home Assistant Control Center with corrected Lights/Fans device filtering and room header visibility"
+  "version": "1.6.2",
+  "description": "Home Assistant Control Center with Lights, Fans and Switches filter and always-visible room headings"
 }
