@@ -163,11 +163,28 @@ function saveCachedControls(rows){
 function fetchControlsIfStale(force){
   var cached=getCachedControls();
   var age=Date.now()-Number(localStorage.getItem(CATALOG_FETCH_AT_KEY)||0);
-  if(!force&&cached.length&&age>=0&&age<CATALOG_TTL_MS)return Promise.resolve(cached);
+  if(!force&&cached.length&&cached.every(function(r){return typeof r.advanced==='boolean';})&&
+    age>=0&&age<CATALOG_TTL_MS)return Promise.resolve(cached);
   if(catalogPromise)return catalogPromise;
-  catalogPromise=pluginAction('list_controls',{}).then(function(result){
-    var rows=pluginJson(result);
-    if(!Array.isArray(rows))throw Error('Bridge returned no controllable entities');
+  // Plugin pages are 48 entities so large HA installations do not silently
+  // lose fans past the first page. Stop at 240 entities to bound phone memory.
+  function getPage(offset,all,seen){
+    return pluginAction('list_controls',{offset:offset}).then(function(result){
+      var page=pluginJson(result);
+      if(!Array.isArray(page))throw Error('Bridge returned no controllable entities');
+      var added=0;
+      page.forEach(function(row){
+        if(row&&row.id&&!seen[row.id]){
+          seen[row.id]=true;all.push(row);added++;
+        }
+      });
+      // Older plugin versions ignore offset and repeat the first page.
+      if(page.length===48&&added>0&&offset+48<240)
+        return getPage(offset+48,all,seen);
+      return all;
+    });
+  }
+  catalogPromise=getPage(0,[],{}).then(function(rows){
     saveCachedControls(rows);
     return rows;
   }).then(function(rows){catalogPromise=null;return rows;},function(err){
@@ -188,10 +205,17 @@ function displayState(row){
 function configureWithDevices(rows){
   var cfg=clayConfig.slice();
   var favorites=favoriteIds(),hidden=hiddenIds();
+  // Settings has 48 reserved checkbox groups. Ensure fans and saved
+  // favorites remain selectable even when a home has more devices.
   favoriteConfigRows=rows.slice().sort(function(a,b){
+    var pa=favorites.indexOf(a.id)>=0?0:a.domain==='fan'?1:2;
+    var pb=favorites.indexOf(b.id)>=0?0:b.domain==='fan'?1:2;
+    return pa-pb||String(a.room||'').localeCompare(String(b.room||''))||
+      String(a.name||'').localeCompare(String(b.name||''));
+  }).slice(0,48).sort(function(a,b){
     return String(a.room||'').localeCompare(String(b.room||''))||
       String(a.name||'').localeCompare(String(b.name||''));
-  }).slice(0,48);
+  });
   var items=[
     {type:'heading',defaultValue:'Watch devices'},
     {type:'text',defaultValue:'Tap the star to favorite or the crossed circle to hide. Hidden favorites remain saved.'},
@@ -416,18 +440,24 @@ function normalizeCatalog(rows){
   var favorites=favoriteIds(),hidden=hiddenIds();
   return rows.filter(function(r){return r&&typeof r.id==='string'&&hidden.indexOf(r.id)<0;})
     .sort(function(a,b){
-      return String(a.room||'').localeCompare(String(b.room||''))||
+      var pa=favorites.indexOf(a.id)>=0?0:a.domain==='fan'?1:2;
+      var pb=favorites.indexOf(b.id)>=0?0:b.domain==='fan'?1:2;
+      return pa-pb||String(a.room||'').localeCompare(String(b.room||''))||
         String(a.name||'').localeCompare(String(b.name||''))||
         String(a.id).localeCompare(String(b.id));
-    }).slice(0,48).map(function(r){
+    }).slice(0,48).sort(function(a,b){
+      return String(a.room||'').localeCompare(String(b.room||''))||
+        String(a.name||'').localeCompare(String(b.name||''));
+    }).map(function(r){
       return {id:r.id,name:r.name,room:r.room,domain:r.domain,
-        state:displayState(r),favorite:favorites.indexOf(r.id)>=0};
+        state:displayState(r),favorite:favorites.indexOf(r.id)>=0,
+        advanced:r.advanced===true};
     });
 }
 function catalogRevision(rows){
   // Keep dynamic states out of this hash: on/off changes send tiny deltas.
   var text='HA-WATCH-CATALOG-V2|'+rows.map(function(r){
-    return [r.id,r.name,r.room,r.domain,r.favorite?'1':'0'].join('|');
+    return [r.id,r.name,r.room,r.domain,r.favorite?'1':'0',r.advanced?'1':'0'].join('|');
   }).join('\n'),hash=5381;
   for(var i=0;i<text.length;i++)hash=((hash*33)^text.charCodeAt(i))|0;
   return hash||1;
@@ -448,7 +478,8 @@ function controlRow(r,index){
     CTRL_NAME:String(r.name||'Device').slice(0,35),
     CTRL_STATUS:String(r.state||'unknown').slice(0,11),
     CTRL_ROOM:String(r.room||'Unassigned').slice(0,21),
-    CTRL_KIND:controlKind(r.domain),CTRL_FAV:r.favorite?1:0};
+    CTRL_KIND:controlKind(r.domain),CTRL_FAV:r.favorite?1:0,
+    CTRL_ADVANCED:r.advanced?1:0};
 }
 function sendCatalog(watchRevision,rows){
   controlRows=normalizeCatalog(rows);
