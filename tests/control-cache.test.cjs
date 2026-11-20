@@ -5,177 +5,150 @@ const vm=require('vm');
 const JS=fs.readFileSync('src/pkjs/index.js','utf8');
 const C=fs.readFileSync('src/c/ha_controls.c','utf8');
 const manifest=require('../package.json');
-const rows=[
-  {id:'light.kitchen',name:'Kitchen Lamp',room:'Kitchen',domain:'light',state:'off',advanced:false},
-  {id:'scene.evening',name:'Evening Lights',room:'Living Room',domain:'scene',state:'off',advanced:false},
-  {id:'script.relax',name:'Relax',room:'Living Room',domain:'script',state:'off',advanced:false}
-];
-function harness(storage){
-  let handlers={},outgoing=[],invoked=[],opened=[],sourceTimeout=[],configs=[];
+const deviceRows=[];
+for(let i=0;i<94;i++)deviceRows.push({
+  id:'switch.item_'+String(i).padStart(3,'0'),name:'Switch '+String(i).padStart(3,'0'),
+  room:i<50?'Kitchen':'Living Room',domain:'switch'
+});
+deviceRows.push({id:'fan.attic',name:'Attic Fan',room:'Attic',domain:'fan'});
+deviceRows.push({id:'scene.evening',name:'Evening',room:'Living Room',domain:'scene'});
+deviceRows.push({id:'light.porch',name:'Porch Light',room:'Porch',domain:'light'});
+const storage={
+  HA_HIDDEN_V1:JSON.stringify(['switch.item_090']),
+  HA_FAVORITES_V1:JSON.stringify(['light.porch'])
+};
+function harness(store){
+  const handlers={},sent=[],calls=[],configs=[],opened=[];
   const localStorage={
-    getItem:key=>Object.prototype.hasOwnProperty.call(storage,key)?storage[key]:null,
-    setItem:(key,value)=>{storage[key]=String(value);},
-    removeItem:key=>{delete storage[key];}
+    getItem:k=>Object.prototype.hasOwnProperty.call(store,k)?store[k]:null,
+    setItem:(k,v)=>{store[k]=String(v);},removeItem:k=>delete store[k]
   };
   const Pebble={
-    addEventListener:(name,handler)=>{handlers[name]=handler;},
+    addEventListener:(k,fn)=>{handlers[k]=fn;},
     getActiveWatchInfo:()=>({platform:'emery'}),
     openURL:url=>opened.push(url),
-    sendAppMessage:(message,ok,err)=>{outgoing.push(message);if(ok)ok();},
+    sendAppMessage:(m,ok)=>{sent.push(m);if(ok)ok();},
     invokeAction:({action,args})=>{
-      invoked.push({action,args});
+      calls.push({action,args});
       if(action==='list_controls'){
-        const offset=Number(args.offset)||0;
-        return Promise.resolve({ok:true,text:JSON.stringify(rows.slice(offset,offset+48))});
+        assert.strictEqual(args.metadata_only,true,'Bridge discovery needs metadata only');
+        const off=Number(args.offset)||0;
+        return Promise.resolve({ok:true,text:JSON.stringify(deviceRows.slice(off,off+48))});
+      }
+      if(action==='get_state'){
+        return Promise.resolve({ok:true,text:JSON.stringify({
+          entity_id:args.entity_id,state:'on',
+          attributes:args.entity_id.startsWith('fan.')?{percentage:40,supported_features:1}:{}
+        })});
       }
       if(action==='control_entity')return Promise.resolve({ok:true,text:'{}'});
-      if(action==='get_state')return Promise.resolve({ok:true,text:JSON.stringify({state:'on'})});
-      throw Error('Unexpected plugin action '+action);
+      throw Error('Unexpected action '+action);
     }
   };
-  function Clay(config){configs.push(config);this.generateUrl=()=> 'pebble://settings';}
-  const audio={
-    diagnostics:()=>null,handleMessage:()=>false,stop:()=>{},
-    speak:()=>Promise.resolve()
-  };
+  function Clay(cfg){configs.push(cfg);this.generateUrl=()=> 'pebble://settings';}
+  const audio={diagnostics:()=>null,handleMessage:()=>false,stop:()=>{},speak:()=>Promise.resolve()};
   const context={Pebble,localStorage,console,Date,JSON,Math,Promise,Number,String,
-    setTimeout:(cb,ms)=>{sourceTimeout.push({cb,ms});return 1;},
-    setInterval:()=>1,
-    require:name=>name==='pebble-clay'?Clay:name==='./ha_audio'?{create:()=>audio}:
-      (()=>{throw Error('Unexpected require '+name);})()
+    setTimeout:()=>1,setInterval:()=>1,
+    require:n=>n==='pebble-clay'?Clay:n==='./ha_audio'?{create:()=>audio}:
+      (()=>{throw Error('Unexpected require '+n);})()
   };
   vm.runInNewContext(JS,context,{filename:'index.js'});
-  return {handlers,outgoing,invoked,opened,configs,storage,fire:m=>handlers.appmessage({payload:m})};
+  return {handlers,sent,calls,configs,opened,storage:store,
+    fire:msg=>handlers.appmessage({payload:msg})};
 }
-async function flush(){for(let i=0;i<9;i++)await new Promise(resolve=>setImmediate(resolve));}
+async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r));}
 (async()=>{
-  const storage={};
-  let h=harness(storage);
-  h.fire({COMMAND:'CTRL_REQUEST',CTRL_REV:0});
+  const h=harness(storage);
+  h.fire({COMMAND:'CTRL_REQUEST',CTRL_INDEX:0,CTRL_OFFSET:0,CTRL_REV:0});
   await flush();
-  assert.strictEqual(h.invoked.filter(x=>x.action==='list_controls').length,1);
-  let rowsOut=h.outgoing.filter(x=>x.COMMAND==='CTRL_ROW');
-  assert.strictEqual(rowsOut.length,3,'First request sends complete catalog');
-  assert.strictEqual(rowsOut.find(x=>x.CTRL_NAME==='Evening Lights').CTRL_STATUS,'Run');
-  assert.strictEqual(rowsOut.find(x=>x.CTRL_NAME==='Relax').CTRL_STATUS,'Run');
-  assert(rowsOut.every(x=>!x.CTRL_ID),'Device IDs stay on phone, not over Bluetooth');
-  const done=h.outgoing.find(x=>x.COMMAND==='CTRL_DONE');
-  assert(done&&Number.isInteger(done.CTRL_REV));
-  assert.strictEqual(done.CTRL_TOTAL,3);
-  assert(storage.HA_WATCH_IDS_V2,'Last acknowledged watch index-to-ID mapping persists');
+  assert.strictEqual(h.calls.filter(x=>x.action==='list_controls').length,3,
+    'Full 97-device catalog is fetched in three Bridge pages');
+  assert.strictEqual(h.sent.filter(x=>x.COMMAND==='CTRL_ROW').length,32,
+    'Watch sends one bounded page, not the entire catalog');
+  const done=h.sent.find(x=>x.COMMAND==='CTRL_DONE');
+  assert.strictEqual(done.CTRL_TOTAL,32);
+  assert.strictEqual(done.CTRL_GRAND_TOTAL,96,'Only hidden devices are omitted');
+  assert.strictEqual(done.CTRL_HAS_MORE,1);
+  assert.strictEqual(done.CTRL_OFFSET,0);
+  assert(h.sent.filter(x=>x.COMMAND==='CTRL_ROW').every(r=>
+    !('CTRL_STATUS' in r)&&!('CTRL_ADVANCED' in r)),
+    'Status and advanced capability are not pushed with names and rooms');
+  assert(JSON.parse(storage.HA_CONTROLS_CACHE_V1).every(x=>
+    !('state' in x)&&!('advanced' in x)&&!('brightness' in x)),
+    'Phone remembers only metadata');
 
-  h.outgoing.length=0;
-  h.fire({COMMAND:'CTRL_REQUEST',CTRL_REV:done.CTRL_REV});
+  h.sent.length=0;
+  h.fire({COMMAND:'CTRL_REQUEST',CTRL_INDEX:0,CTRL_OFFSET:32,CTRL_REV:0});
   await flush();
-  assert.strictEqual(h.outgoing.filter(x=>x.COMMAND==='CTRL_ROW').length,0,
-    'Unchanged catalog must not retransmit rows');
-  assert.strictEqual(h.invoked.filter(x=>x.action==='list_controls').length,1,
-    'Warm catalog must not call Bridge again');
-  assert.strictEqual(h.outgoing.filter(x=>x.COMMAND==='CTRL_DONE').length,1);
-
-  // A PebbleKit JS process restart must not break actions from the watch cache.
-  h=harness(storage);
-  h.fire({COMMAND:'CTRL_ACT',CTRL_INDEX:1});
+  assert.strictEqual(h.sent.filter(x=>x.COMMAND==='CTRL_ROW').length,32,
+    'Second 32-device page is accessible');
+  assert.strictEqual(h.sent.find(x=>x.COMMAND==='CTRL_DONE').CTRL_OFFSET,32);
+  h.sent.length=0;
+  h.fire({COMMAND:'CTRL_REQUEST',CTRL_INDEX:0,CTRL_OFFSET:64,CTRL_REV:0});
   await flush();
-  assert.strictEqual(h.invoked[0].action,'control_entity');
-  assert.strictEqual(h.invoked[0].args.entity_id,'scene.evening');
-  assert(!h.invoked.some(x=>x.action==='get_state'),'Scene is never read as on/off');
-  assert(h.outgoing.some(x=>x.COMMAND==='CTRL_ACTION_DONE'&&x.CTRL_STATUS==='Triggered'));
+  assert.strictEqual(h.sent.filter(x=>x.COMMAND==='CTRL_ROW').length,32);
+  assert.strictEqual(h.sent.find(x=>x.COMMAND==='CTRL_DONE').CTRL_HAS_MORE,0,
+    'Final page has no Next navigation');
+  assert.strictEqual(h.calls.filter(x=>x.action==='list_controls').length,3,
+    'Page changes use phone cache and no extra Bridge requests');
 
-  h=harness(storage);
-  h.fire({COMMAND:'CTRL_ACT',CTRL_INDEX:0});
-  await flush();
-  assert(h.invoked.some(x=>x.action==='get_state'),'Light is read after toggling');
-  assert(h.outgoing.some(x=>x.COMMAND==='CTRL_STATE'&&x.CTRL_STATUS==='on'));
-
+  // Settings displays ALL entities, not only the 32 currently on watch or
+  // the old 48 reserved Clay keys. Filter is a view preference, not deletion.
   h.handlers.showConfiguration();
-  assert.strictEqual(h.opened.length,1,'Cached settings open without waiting for Bridge');
-  const config=h.configs[h.configs.length-1];
-  const sections=config.filter(x=>x.type==='section');
-  const headings=sections.map(x=>x.items[0].defaultValue);
-  assert.strictEqual(headings.join('|'),'Display|Home Assistant Bridge|Watch devices',
-    'Display and Bridge settings precede the device list');
-  assert(!JSON.stringify(config).includes('Latest Bridge and watch audio diagnostics'),
-    'Diagnostics panel is removed');
-  assert(!JSON.stringify(config).includes('pcm_debug_display'),
-    'No hidden diagnostics remnants on the page');
+  const cfg=h.configs[h.configs.length-1];
+  const sections=cfg.filter(x=>x.type==='section');
+  assert.deepStrictEqual(sections.map(x=>x.items[0].defaultValue),
+    ['Display','Home Assistant Bridge','Watch devices']);
   const devices=sections[2].items.filter(x=>x.type==='checkboxgroup');
-  assert.strictEqual(devices.length,3,'One grouped control per device');
-  assert.strictEqual(devices[0].label,'Kitchen Lamp');
-  assert(JS.includes('.component-checkbox{display:flex!important;align-items:center;gap:6px'),
-    'Device names and actions must share one horizontal row');
-  assert(JS.includes('font-size:14px!important')&&JS.includes('max-height:2.6em'),
-    'Device names use smaller two-line text when needed');
-  assert(JS.includes('.checkbox-group{display:flex;align-items:center;justify-content:flex-end'),
-    'Both action icons must be right-aligned');
-  assert(JS.includes('flex:0 0 44px')&&JS.includes('height:44px'),
-    'Each icon keeps a 44-pixel touch target');
-  assert(JS.includes('label:first-child i:before{content:"☆"')&&
-      JS.includes('label:first-child input:checked+i:before{content:"★"'),
-    'Star outlines/fills reflect native Favorite checkbox state');
-  assert(JS.includes('label:nth-child(2) i:before{content:""')&&
-      JS.includes('label:nth-child(2) i:after{content:""')&&
-      JS.includes('rotate(-45deg)')&&
-      JS.includes('label:nth-child(2) input:checked+i{color:#ff7a16'),
-    'Hide control must draw a slash-circle with inactive and active colors');
-  assert(JS.includes('label .label{position:absolute!important'),
-    'Native control labels remain accessible but do not consume visual space');
-  assert.strictEqual(devices[0].messageKey,'DEV_0');
-  assert.strictEqual(JSON.stringify(devices[0].options),JSON.stringify(['Favorite','Hide']));
-  assert.strictEqual(JSON.stringify(devices[0].defaultValue),JSON.stringify([false,false]),
-    'Existing saved selections become checkboxes');
-  assert(!sections[2].items.some(x=>x.messageKey&&/^(FAV_|HIDE_)/.test(x.messageKey)),
-    'No duplicate per-device toggle rows');
-  for(let i=0;i<48;i++)assert(manifest.pebble.messageKeys.includes('DEV_'+i+'[2]'),
-    'Every dynamic checkbox group must have a Pebble message-key array');
-
+  assert.strictEqual(devices.length,97);
+  assert.strictEqual(devices[96].messageKey,'DEV_96');
+  const filter=sections[2].items.find(x=>x.messageKey==='SHOW_ALL_DEVICES');
+  assert(filter&&filter.defaultValue===false,'Lights & Fans is default view');
+  assert(JS.includes("page.EVENTS.AFTER_BUILD")&&JS.includes("toggle.addEventListener('change'"),
+    'Show All immediately changes visible settings rows');
+  assert(JS.includes("r.domain==='light'")&&JS.includes('isFanControl(r)'),
+    'The filter includes lights and fan-backed switches');
+  assert(JS.includes('renderRoomHeaders()'),'Empty room titles disappear when filtered');
   h.handlers.webviewclosed({response:encodeURIComponent(JSON.stringify({
-    DEV_0:{value:[true,true]}
+    SHOW_ALL_DEVICES:{value:true},DEV_96:{value:[true,false]}
   }))});
-  assert(JSON.parse(storage.HA_FAVORITES_V1).includes('light.kitchen'));
-  assert(JSON.parse(storage.HA_HIDDEN_V1).includes('light.kitchen'));
-  assert(h.outgoing.some(x=>x.COMMAND==='CTRL_INVALIDATE'),
-    'Changing favorites or hide emits only one invalidation');
+  assert.strictEqual(storage.SHOW_ALL_DEVICES,'true');
+  assert(JSON.parse(storage.HA_FAVORITES_V1).includes('light.porch'));
+  assert(!JSON.parse(storage.HA_HIDDEN_V1).includes('light.porch'));
 
-  h.outgoing.length=0;
-  h.fire({COMMAND:'CTRL_REQUEST',CTRL_REV:done.CTRL_REV});
+  // Selecting the fan on any page fetches its current status/capabilities,
+  // only after the device is selected.
+  h.sent.length=0;
+  h.fire({COMMAND:'CTRL_REQUEST',CTRL_INDEX:0,CTRL_OFFSET:0,CTRL_REV:0});
   await flush();
-  assert.strictEqual(h.outgoing.filter(x=>x.COMMAND==='CTRL_ROW').length,2,
-    'Hidden entity absent from the next watch catalog');
-  const currentDone=h.outgoing.find(x=>x.COMMAND==='CTRL_DONE');
-  assert.strictEqual(currentDone.CTRL_TOTAL,2);
-  assert.notStrictEqual(currentDone.CTRL_REV,done.CTRL_REV);
-  assert(storage.HA_FAVORITES_V1,'Favorites preserved even when a device is hidden');
+  const currentIds=JSON.parse(storage.HA_WATCH_PAGE_IDS_V3);
+  const fanIndex=currentIds.indexOf('fan.attic');
+  assert(fanIndex>=0);
+  const callsBefore=h.calls.filter(x=>x.action==='get_state').length;
+  h.fire({COMMAND:'CTRL_INSPECT',CTRL_INDEX:fanIndex});
+  await flush();
+  assert.strictEqual(h.calls.filter(x=>x.action==='get_state').length,callsBefore+1,
+    'Only the selected fan gets an API state lookup');
+  assert(h.sent.some(x=>x.COMMAND==='CTRL_DETAIL_OPEN'&&x.CTRL_INDEX===fanIndex));
+  assert(h.sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_ADJUSTABLE===1));
 
-  assert(C.includes('CACHE_REFRESH_SECONDS 3600'));
-  assert(C.includes('static void catalog_restore(void)'));
-  assert(C.includes('static void visible_rebuild(void)'));
-  assert(C.includes('static void rooms_rebuild(void)'));
-  assert(C.includes('static void catalog_request_if_due(void)'));
-  assert(C.includes('PERSIST_DATA_MAX_LENGTH'));
-  assert(C.includes('return s_large_text?80:46;'));
-  assert(C.includes('home_title_top()'));
-  for(const key of ['CTRL_REV','CTRL_TOTAL'])
-    assert(manifest.pebble.messageKeys.includes(key));
-  // More than 48 Home Assistant entities: the plugin pages discovery
-  // and the watch catalog prioritizes otherwise-hidden fan entities.
-  rows.length=0;
-  for(let i=0;i<55;i++)rows.push({
-    id:'switch.generic_'+i,name:'Generic '+i,room:'Zone',
-    domain:'switch',state:'off',advanced:false
-  });
-  rows.push({id:'fan.living_room',name:'Living Room Fan',room:'Living Room',
-    domain:'fan',state:'on',advanced:true});
-  const paged=harness({});
-  paged.fire({COMMAND:'CTRL_REQUEST',CTRL_REV:0});
+  // Recheck requests fresh metadata, even when the catalog is already warm.
+  const before=h.calls.filter(x=>x.action==='list_controls').length;
+  h.sent.length=0;
+  h.fire({COMMAND:'CTRL_FORCE_REFRESH'});
   await flush();
-  const listCalls=paged.invoked.filter(x=>x.action==='list_controls');
-  assert.strictEqual(listCalls.length,2,'Fetch second 48-entity page');
-  assert.strictEqual(listCalls[1].args.offset,48);
-  assert(paged.outgoing.some(x=>x.COMMAND==='CTRL_ROW'&&
-    x.CTRL_NAME==='Living Room Fan'&&x.CTRL_KIND===3&&x.CTRL_ADVANCED===1),
-    'Fan after first 48 items must be visible and marked adjustable');
-  assert.strictEqual(paged.outgoing.filter(x=>x.COMMAND==='CTRL_ROW').length,48,
-    'Watch catalog retains its bounded memory footprint');
-    console.log('Catalog caching, no-repeat Bluetooth transport, JS restart, actions and hide/favorites passed');
+  assert(h.calls.filter(x=>x.action==='list_controls').length>before);
+  assert(h.sent.some(x=>x.COMMAND==='CTRL_DONE'));
+
+  assert(!JS.includes('.slice(0,48)'), 'No 48-device UI selection cutoff');
+  assert(C.includes('#define PAGE_SIZE 32'),'Watch buffers a finite page only');
+  assert(C.includes('static void cache_schema_migrate(void)'));
+  assert(C.includes('sizeof(CachedRow)*PAGE_SIZE'));
+  assert(C.includes('s_page_offset'));
+  assert(C.includes('More devices'));
+  assert(C.includes('s_incoming[index]'),'Atomic page staging prevents partial lists');
+  assert(!C.includes('catalog_store_status('),'Status must never be persisted');
+  for(const key of ['CTRL_OFFSET','CTRL_HAS_MORE','CTRL_GRAND_TOTAL'])
+    assert(manifest.pebble.messageKeys.includes(key),'Missing page protocol key '+key);
+  console.log('Unlimited phone catalog, dynamic settings, Lights/Fans filter, paged watch navigation and lazy state passed');
 })().catch(e=>{console.error(e);process.exit(1);});
