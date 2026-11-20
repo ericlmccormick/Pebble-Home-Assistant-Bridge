@@ -198,10 +198,13 @@ function fetchControlsIfStale(force){
   return catalogPromise;
 }
 function isFanControl(row){
-  return row&&(
-    row.domain==='fan'||
-    (row.domain==='switch'&&/\b(fan|ventilator|exhaust|air.handler)\b/i.test(String(row.name||row.id||'')))
-  );
+  if(!row)return false;
+  if(row.domain==='fan')return true;
+  if(row.domain!=='switch'&&row.domain!=='input_boolean')return false;
+  // A friendly name can be "Bedroom" while the HA entity ID is
+  // "switch.bedroom_ceiling_fan". Test both, accepting HA underscores.
+  var pattern=/(^|[^a-z0-9])(fan|fans|vent|ventilator|ventilation|exhaust|air[._ -]*handler)(?=$|[^a-z0-9])/i;
+  return pattern.test(String(row.name||''))||pattern.test(String(row.id||''));
 }
 function controlKind(domain,name){
   if(isFanControl({domain:domain,name:name}))return 3;
@@ -237,6 +240,10 @@ function configureWithDevices(rows){
     {type:'text',defaultValue:
       '<style>'+
       '.component-checkbox{display:flex!important;align-items:center;gap:6px;min-height:46px;padding-top:4px!important;padding-bottom:4px!important;}'+
+      // More-specific important rules must override the compact row's
+      // display:flex!important, which defeated inline style.display='none'.
+      '.component-checkbox.ha-device-filter-hidden{display:none!important;}'+
+      '.component-heading.ha-room-filter-hidden{display:none!important;}'+
       '.component-checkbox>.label{display:block;flex:1 1 auto;min-width:0;font-weight:400!important;font-size:14px!important;line-height:1.25;white-space:normal;overflow-wrap:anywhere;padding:0!important;margin:0!important;max-height:2.6em;overflow:hidden;}'+
       '.component-checkbox .checkbox-group{display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;gap:0;margin:0!important;padding:0!important;}'+
       '.component-checkbox .checkbox-group label{display:flex!important;flex:0 0 44px;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;margin:0!important;padding:0!important;position:relative;}'+
@@ -286,34 +293,43 @@ function configureWithDevices(rows){
   clay=new Clay(cfg,function(){
     var page=this;
     page.on(page.EVENTS.AFTER_BUILD,function(){
-      var settings=page.meta.userData||{};
-      var visible=settings.lightFanFlags||[],groups=settings.roomGroups||[];
-      var item=page.getItemByMessageKey('SHOW_ALL_DEVICES');
-      var root=item&&item.$element&&item.$element[0];
-      var toggle=root&&root.querySelector('input');
-      var elements=document.querySelectorAll('.component-checkbox');
-      if(!toggle||elements.length<visible.length)return;
+      var data=page.meta.userData||{};
+      var flags=data.lightFanFlags||[],groups=data.roomGroups||[];
+      var control=page.getItemByMessageKey('SHOW_ALL_DEVICES');
+      var toggleRoot=control&&control.$element&&control.$element[0];
+      var toggle=toggleRoot&&toggleRoot.querySelector('input[type="checkbox"]');
+      // Do not assume checkboxgroups are the only .component-checkbox nodes:
+      // resolve each exact DEV_i key through Clay's own registry.
+      var deviceElements=flags.map(function(flag,i){
+        var item=page.getItemByMessageKey('DEV_'+i);
+        return item&&item.$element&&item.$element[0];
+      });
       groups.forEach(function(group){
         var heading=page.getItemById(group.id);
         group.element=heading&&heading.$element&&heading.$element[0];
       });
       function render(){
-        for(var i=0;i<visible.length;i++)
-          elements[i].style.display=toggle.checked||visible[i]?'':'none';
+        var all=toggle?!!toggle.checked:!!data.showAllDefault;
+        for(var i=0;i<flags.length;i++){
+          var el=deviceElements[i];
+          if(el)el.classList.toggle('ha-device-filter-hidden',!all&&!flags[i]);
+        }
         groups.forEach(function(group){
           if(!group.element)return;
-          var any=false;
+          var hasLightOrFan=false;
           for(var j=group.start;j<group.start+group.count;j++){
-            if(visible[j]){any=true;break;}
+            if(flags[j]){hasLightOrFan=true;break;}
           }
-          group.element.style.display=toggle.checked||any?'':'none';
+          group.element.classList.toggle('ha-room-filter-hidden',
+            !all&&!hasLightOrFan);
         });
       }
-      toggle.addEventListener('change',render);
+      if(toggle)toggle.addEventListener('change',render);
       render();
     });
   },{autoHandleEvents:false});
   clay.meta.userData={
+    showAllDefault:showAllDevices,
     lightFanFlags:favoriteConfigRows.map(function(r){
       return r.domain==='light'||isFanControl(r);
     }),
