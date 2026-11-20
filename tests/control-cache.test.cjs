@@ -103,17 +103,18 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   assert.strictEqual(devices.length,97);
   assert.strictEqual(devices[96].messageKey,'DEV_96');
   const filter=sections[2].items.find(x=>x.messageKey==='SHOW_ALL_DEVICES');
-  assert(filter&&filter.defaultValue===false,'Lights & Fans is default view');
+  assert(filter&&filter.defaultValue===false,'Lights, Fans & Switches is default view');
   assert(JS.includes("page.EVENTS.AFTER_BUILD")&&JS.includes("toggle.addEventListener('change'"),
     'Show All immediately changes visible settings rows');
-  assert(JS.includes("r.domain==='light'")&&JS.includes('isFanControl(r)'),
-    'The filter includes lights and fan-backed switches');
+  assert(JS.includes("r.domain==='light'")&&JS.includes("r.domain==='fan'")&&
+    JS.includes("r.domain==='switch'")&&JS.includes('isFanControl(r)'),
+    'The default filter includes lights, fans and ordinary switches');
   assert(JS.includes('clay.meta.userData={')&&JS.includes('var data=page.meta.userData||{}'),
-    'Lights/Fans metadata survives Clay callback serialization into separate webview');
+    'Device type metadata survives Clay callback serialization into separate webview');
   assert(JS.includes('.component-checkbox.ha-device-filter-hidden{display:none!important;}'),
     'Filtered device rows override the compact layout flex!important rule');
-  assert(JS.includes('.component-heading.ha-room-filter-hidden{display:none!important;}'),
-    'Room headings are filtered independently with the same CSS priority');
+  assert(!JS.includes('ha-room-filter-hidden'),
+    'Room headings are always present regardless of device type filtering');
   assert(JS.includes('page.getItemByMessageKey(\'DEV_\'+i)'),
     'Filter resolves each exact device row instead of relying on DOM list order');
   h.handlers.webviewclosed({response:encodeURIComponent(JSON.stringify({
