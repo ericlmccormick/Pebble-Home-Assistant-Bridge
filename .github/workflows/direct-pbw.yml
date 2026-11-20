@@ -2,7 +2,7 @@ name: Build and publish direct PBW
 on:
   workflow_dispatch:
   push:
-    branches: [continuous-native-conversation, fix/mirrored-device-duplicates]
+    branches: [continuous-native-conversation, perf/parallel-device-status]
     paths:
       - 'package.json'
       - 'src/**'
@@ -40,6 +40,7 @@ jobs:
           node tests/sentence-prefetch.test.cjs
           node tests/theme-contrast.test.cjs
           node tests/control-cache.test.cjs
+          node tests/status-concurrency.test.cjs
           node tests/phone-filter.test.cjs
           node tests/inline-rooms.test.cjs
           node tests/watch-settings.test.cjs
@@ -69,13 +70,13 @@ jobs:
           path: direct-download/home-assistant-ai.pbw
           if-no-files-found: error
       - name: Publish directly installable PBW to GitHub Releases
-        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/fix/mirrored-device-duplicates'
+        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/perf/parallel-device-status'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG=dev-mirrored-device-duplicates
-          if [[ "$GITHUB_REF_NAME" != "fix/mirrored-device-duplicates" ]]; then TAG=dev-continuous-native-conversation; fi
+          TAG=dev-parallel-device-status
+          if [[ "$GITHUB_REF_NAME" != "perf/parallel-device-status" ]]; then TAG=dev-continuous-native-conversation; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" \
               --title "Latest development PBW" --prerelease \
