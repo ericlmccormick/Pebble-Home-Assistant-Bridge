@@ -104,8 +104,9 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   assert.strictEqual(devices[96].messageKey,'DEV_96');
   const filter=sections[2].items.find(x=>x.messageKey==='SHOW_ALL_DEVICES');
   assert(filter&&filter.defaultValue===false,'Lights, Fans & Switches is default view');
-  assert(JS.includes("page.EVENTS.AFTER_BUILD")&&JS.includes("toggle.addEventListener('change'"),
-    'Show All immediately changes visible settings rows');
+  assert(JS.includes("page.EVENTS.AFTER_BUILD")&&
+    JS.includes("control.on('change',render)")&&JS.includes('control.get()'),
+    'Show All immediately changes visible settings rows via Clay item API');
   assert(JS.includes("r.domain==='light'")&&JS.includes("r.domain==='fan'")&&
     JS.includes("r.domain==='switch'")&&JS.includes('isFanControl(r)'),
     'The default filter includes lights, fans and ordinary switches');
