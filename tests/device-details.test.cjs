@@ -20,7 +20,7 @@ assert(c.includes('window_single_click_subscribe(BUTTON_ID_DOWN,detail_down_clic
 assert(c.includes('static void detail_click_config(void *context)'));
 assert(c.includes('if(strcmp(command,"CTRL_DETAIL_OPEN")==0)'),
   'A live capability check opens details only for adjustable entities');
-assert(js.includes("if(meta.adjustable){")&&js.includes('controlAct(index);'),
+assert(js.includes("if(meta.adjustable||item.row.domain==='lock'||item.row.domain==='cover')")&&js.includes('controlAct(index);'),
   'Simple entities toggle after live inspection; adjustable devices open details');
 const state={
   'light.bed':{entity_id:'light.bed',state:'on',
