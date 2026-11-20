@@ -415,10 +415,21 @@ function sendWatchSettings(preview){
   themeDarkSent=dark;
   if(themeMode==='auto'&&weatherSunrise&&weatherSunset)
     localStorage.setItem('HA_LAST_AUTO_DARK',String(dark));
-  Pebble.sendAppMessage({COMMAND:'SETTINGS',FONT_SIZE:fontChoice==='large'?28:24,
+  var message={COMMAND:'SETTINGS',FONT_SIZE:fontChoice==='large'?28:24,
     THEME_MODE_CODE:themeMode==='night'?1:themeMode==='day'?0:2,
     LARGE_TEXT:fontChoice==='large'?1:0,THEME_DARK:dark?1:0,
-    AUTO_SEND:autoSend?1:0,HAPTIC_LEVEL:hapticValues[hapticLevel]||0},
+    AUTO_SEND:autoSend?1:0,HAPTIC_LEVEL:hapticValues[hapticLevel]||0};
+  // Send clock minutes rather than yesterday's epoch. The watch saves these
+  // locally and can determine Auto appearance before PebbleKit starts.
+  var age=Date.now()-weatherUpdatedAt;
+  if(weatherSunrise>0&&weatherSunset>weatherSunrise&&
+     age>=0&&age<72*3600*1000){
+    var rise=new Date(weatherSunrise*1000),set=new Date(weatherSunset*1000);
+    message.THEME_SUNRISE_MIN=rise.getHours()*60+rise.getMinutes();
+    message.THEME_SUNSET_MIN=set.getHours()*60+set.getMinutes();
+    message.THEME_SOLAR_SYNC_AT=Math.floor(Date.now()/1000);
+  }
+  Pebble.sendAppMessage(message,
     function(){
       if(preview)Pebble.sendAppMessage({COMMAND:'HAPTIC_PREVIEW',
         HAPTIC_LEVEL:hapticValues[hapticLevel]||0});
