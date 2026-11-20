@@ -26,6 +26,8 @@ jobs:
         run: node tests/control-cache.test.cjs
       - name: Inline room navigation and action mapping
         run: node tests/inline-rooms.test.cjs
+      - name: On-watch settings and fan discovery recheck
+        run: node tests/watch-settings.test.cjs
       - name: Static watch SDK interface validation
         run: |
           python3 - <<'PY'
