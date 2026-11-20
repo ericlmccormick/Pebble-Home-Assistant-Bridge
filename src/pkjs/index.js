@@ -519,6 +519,30 @@ function controlRow(r,index){
     CTRL_KIND:controlKind(r.domain,r.name,r.id),CTRL_FAV:r.favorite?1:0};
 }
 var controlRows=[];
+var statePageGeneration=0;
+function refreshPageStates(page,revision,generation){
+  // Metadata is rendered before any of these requests. Check only devices
+  // on this watch page, two workers max. Status is never saved to disk.
+  var cursor=0;
+  function worker(){
+    if(generation!==statePageGeneration)return Promise.resolve();
+    var index=cursor++;
+    if(index>=page.length)return Promise.resolve();
+    var row=page[index];
+    if(isRunAction(row.domain))return worker();
+    return pluginAction('get_state',{entity_id:row.id}).then(function(result){
+      if(generation!==statePageGeneration)return;
+      var fresh=pluginJson(result);
+      if(fresh&&fresh.state!==undefined){
+        controlSend({COMMAND:'CTRL_STATE',CTRL_INDEX:index,
+          CTRL_REV:revision,CTRL_STATUS:String(fresh.state).slice(0,11)});
+      }
+    }).catch(function(err){
+      console.log('Background device state '+index+': '+String(err&&err.message||err));
+    }).then(worker);
+  }
+  return Promise.all([worker(),worker()]);
+}
 function sendCatalog(watchRevision,rows,mode,offset,alwaysSend){
   mode=mode===1||mode===2?mode:0;
   var full=normalizeCatalog(rows,mode),total=full.length;
@@ -527,18 +551,21 @@ function sendCatalog(watchRevision,rows,mode,offset,alwaysSend){
   if(!total)offset=0;
   controlRows=full.slice(offset,offset+PAGE_SIZE);
   currentWatchMode=mode;currentWatchOffset=offset;
-  var revision=catalogRevision(controlRows,mode,offset);
+  var generation=++statePageGeneration;
+  var pageSnapshot=controlRows.slice();
+  var revision=catalogRevision(pageSnapshot,mode,offset);
   var lastSentRev=Number(localStorage.getItem(LAST_REV_KEY)||0);
   var transmit=!!alwaysSend||watchRevision!==revision||lastSentRev!==revision;
-  var packets=transmit?controlRows.map(controlRow):[];
+  var packets=transmit?pageSnapshot.map(controlRow):[];
   function sendAt(i){
     if(i===packets.length){
       controlSend({COMMAND:'CTRL_DONE',CTRL_TOTAL:controlRows.length,
         CTRL_GRAND_TOTAL:total,CTRL_HAS_MORE:offset+controlRows.length<total?1:0,
         CTRL_OFFSET:offset,CTRL_REV:revision},function(ok){
-          if(ok){
+          if(ok&&generation===statePageGeneration){
             localStorage.setItem(LAST_REV_KEY,String(revision));
-            localStorage.setItem(WATCH_IDS_KEY,JSON.stringify(controlRows.map(function(r){return r.id;})));
+            localStorage.setItem(WATCH_IDS_KEY,JSON.stringify(pageSnapshot.map(function(r){return r.id;})));
+            refreshPageStates(pageSnapshot,revision,generation);
           }
         });
       return;
