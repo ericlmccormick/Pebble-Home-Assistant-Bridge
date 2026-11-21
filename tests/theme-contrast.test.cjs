@@ -40,7 +40,8 @@ assert(controls.includes('PBL_IF_COLOR_ELSE(GColorWhite,s_night_theme?GColorBlac
   'The selected text must match the selection background');
 assert(controls.includes('static GColor cell_fg(bool active)'));
 assert(controls.includes('static GColor cell_sub(bool active)'));
-assert(controls.includes('badge_ink(highlighted)'));
+assert(controls.includes('(unknown||dimmed)?ui_muted():badge_ink(false)'),
+  'Offline icons are gray; ON icons retain their category colors');
 assert(!controls.includes('active?GColorBlack:GColorWhite'),
   'Hard-coded menu text overrides theme contrast');
 assert(!controls.includes('active?GColorBlack:PBL_IF_COLOR_ELSE(GColorLightGray,GColorWhite)'),
