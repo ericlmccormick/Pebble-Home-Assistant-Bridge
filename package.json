@@ -4,12 +4,12 @@
     "pebble-clay": "^1.0.4"
   },
   "keywords": [],
-  "name": "pebble-home-assistant-ai",
+  "name": "pebble-home-assistant-control-center",
   "pebble": {
     "capabilities": [
       "configurable"
     ],
-    "displayName": "Home Assistant AI",
+    "displayName": "Home Assistant Control Center",
     "enableMultiJS": true,
     "messageKeys": [
       "COMMAND",
@@ -18,7 +18,30 @@
       "FONT_SIZE",
       "VOLUME",
       "AUTO_SEND",
-      "HAPTIC_LEVEL"
+      "HAPTIC_LEVEL",
+      "CTRL_INDEX",
+      "CTRL_NAME",
+      "CTRL_STATUS",
+      "CTRL_ID",
+      "CTRL_ROOM",
+      "CTRL_KIND",
+      "CTRL_FAV",
+      "LARGE_TEXT",
+      "THEME_DARK",
+      "CTRL_REV",
+      "CTRL_TOTAL",
+      "CTRL_LEVEL",
+      "CTRL_ADJUSTABLE",
+      "CTRL_DIRECTION",
+      "CTRL_ADVANCED",
+      "THEME_MODE_CODE",
+      "THEME_SUNRISE_MIN",
+      "THEME_SUNSET_MIN",
+      "THEME_SOLAR_SYNC_AT",
+      "CTRL_OFFSET",
+      "CTRL_GRAND_TOTAL",
+      "CTRL_HAS_MORE",
+      "CTRL_SUBTITLE"
     ],
     "projectType": "native",
     "resources": {
@@ -85,9 +108,20 @@
       {
         "name": "InvokeAction",
         "plugin": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57"
+      },
+      {
+        "name": "HomeRead",
+        "plugin": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57"
+      },
+      {
+        "name": "HomeControl",
+        "plugin": "a74370b6-929c-4ec0-b7ee-2fc6fca8db57"
+      },
+      {
+        "name": "Location"
       }
     ]
   },
-  "version": "1.0.0",
-  "description": "Pebble Home Assistant voice app powered exclusively by the Home Assistant Bridge plugin and its reusable audio SDK"
+  "version": "2.0.0",
+  "description": "Home Assistant Control Center for Pebble: room navigation, live device status and controls, scenes, secure door actions, and Home Assistant Assist voice using Home Assistant Bridge."
 }

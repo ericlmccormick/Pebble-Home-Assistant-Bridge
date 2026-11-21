@@ -1,0 +1,18 @@
+'use strict';
+const assert=require('assert');
+const fs=require('fs');
+const watch=fs.readFileSync('src/c/ha_controls.c','utf8');
+const phone=fs.readFileSync('src/pkjs/index.js','utf8');
+assert(watch.includes('app_touch_navigation_enable(true)'), 'Menu touch navigation enabled');
+assert(watch.includes('.appear=list_appear,.disappear=list_disappear'), 'List lifecycle animates fan only on screen');
+assert(watch.includes('touch_service_subscribe(detail_touch,NULL)'), 'Detail window listens for touch');
+assert(watch.includes('window_set_touch_bridge_disabled(w,true)'), 'Slider detail handles touches instead of menu bridge');
+assert(watch.includes('s_detail_level_pending=true'), 'Touch drag previews, not sends');
+assert(watch.includes('CTRL_SET_LEVEL'), 'Select commits slider preview');
+assert(watch.includes('s_fan_frame=(s_fan_frame+1)%6'), 'Fan rotates');
+assert(watch.includes('strcmp(state,"on")==0'), 'Only active fans animate');
+assert(watch.includes('(unknown||dimmed)?ui_muted():badge_ink(false)'), 'Off / unknown icons muted');
+assert(phone.includes('function controlSetLevel(index,requested)'), 'Phone receives exact level');
+assert(phone.includes("service=level===0?'turn_off':domain==='fan'?'set_percentage':'turn_on'"), 'Fan and light use supported services');
+assert(phone.includes("if(d.COMMAND==='CTRL_SET_LEVEL')"), 'Touch command routed');
+console.log('Touch menus, preview-to-confirm slider, gray/off color/on, animated fan checks passed');

@@ -20,6 +20,30 @@ jobs:
         run: node tests/progressive-audio.test.cjs
       - name: Sentence prefetch, ordered chunks and Bluetooth continuity
         run: node tests/sentence-prefetch.test.cjs
+      - name: Day and night text, icon and selection contrast
+        run: node tests/theme-contrast.test.cjs
+      - name: Large font and live status rendering regression
+        run: node tests/status-layout.test.cjs
+      - name: Font alignment and confirmed door controls
+        run: node tests/door-ui.test.cjs
+      - name: Home layout and navigation regression
+        run: node tests/home-layout-navigation.test.cjs
+      - name: First-frame theme and cached solar times
+        run: node tests/theme-startup.test.cjs
+      - name: Offline catalog, scene actions, and visibility regression
+        run: node tests/control-cache.test.cjs
+      - name: Inline room navigation and action mapping
+        run: node tests/inline-rooms.test.cjs
+      - name: On-watch settings and fan discovery recheck
+        run: node tests/watch-settings.test.cjs
+      - name: Clay device filter and room header behavior
+        run: node tests/phone-filter.test.cjs
+      - name: Concurrent live status and BLE queue regression
+        run: node tests/status-concurrency.test.cjs
+      - name: Phone-only startup state prefetch regression
+        run: node tests/startup-prefetch.test.cjs
+      - name: Voice Thinking transcript follows Normal/Large menu fonts
+        run: node tests/voice-thinking-font.test.cjs
       - name: Static watch SDK interface validation
         run: |
           python3 - <<'PY'
@@ -37,5 +61,11 @@ jobs:
           assert 'mic_stream_to_phone' not in c
           assert 'new WebSocket' not in phone and '/api/conversation/process' not in phone
           assert 'USE_BUILTIN_CONNECTION' not in phone
-          print('Bridge-only native audio and message contract passed')
+          controls=Path('src/c/ha_controls.c').read_text()
+          start=controls.index('static void home_load(')
+          end=controls.index('static void home_unload(',start)
+          assert 'window_single_click_subscribe(' not in controls[start:end], 'Home load must not register clicks outside a ClickConfigProvider'
+          assert 'window_set_click_config_provider(w,home_click_config)' in controls[start:end]
+          assert 'static void home_click_config(void *context)' in controls
+          print('Bridge-only native audio and startup click-config contract passed')
           PY

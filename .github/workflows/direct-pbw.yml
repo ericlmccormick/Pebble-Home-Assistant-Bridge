@@ -2,7 +2,7 @@ name: Build and publish direct PBW
 on:
   workflow_dispatch:
   push:
-    branches: [continuous-native-conversation]
+    branches: [continuous-native-conversation, fix/always-refresh-visible-status, 'release/control-center-v2.0.0']
     paths:
       - 'package.json'
       - 'src/**'
@@ -38,6 +38,20 @@ jobs:
           node tests/audio-flow.test.cjs
           node tests/progressive-audio.test.cjs
           node tests/sentence-prefetch.test.cjs
+          node tests/voice-thinking-font.test.cjs
+          node tests/touch-controls.test.cjs
+          node tests/theme-contrast.test.cjs
+          node tests/theme-startup.test.cjs
+          node tests/home-layout-navigation.test.cjs
+          node tests/door-ui.test.cjs
+          node tests/status-layout.test.cjs
+          node tests/control-cache.test.cjs
+          node tests/status-concurrency.test.cjs
+          node tests/startup-prefetch.test.cjs
+          node tests/phone-filter.test.cjs
+          node tests/inline-rooms.test.cjs
+          node tests/watch-settings.test.cjs
+          node tests/device-details.test.cjs
       - name: Install firmware-compatible Pebble SDK
         run: |
           uv tool install pebble-tool
@@ -56,23 +70,26 @@ jobs:
             exit 1
           fi
           mkdir -p direct-download
-          cp "${files[0]}" direct-download/home-assistant-ai.pbw
+          cp "${files[0]}" direct-download/home-assistant-control-center.pbw
       - uses: actions/upload-artifact@v4
         with:
-          name: home-assistant-ai-build
-          path: direct-download/home-assistant-ai.pbw
+          name: home-assistant-control-center-build
+          path: direct-download/home-assistant-control-center.pbw
           if-no-files-found: error
       - name: Publish directly installable PBW to GitHub Releases
-        if: github.ref == 'refs/heads/continuous-native-conversation'
+        if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/release/control-center-v2.0.0' || github.ref == 'refs/heads/fix/always-refresh-visible-status'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          if ! gh release view dev-continuous-native-conversation >/dev/null 2>&1; then
-            gh release create dev-continuous-native-conversation --target "$GITHUB_SHA" \
+          TAG=dev-continuous-native-conversation
+          if [[ "$GITHUB_REF_NAME" == "fix/always-refresh-visible-status" ]]; then TAG=dev-always-refresh-visible-status; fi
+          if [[ "$GITHUB_REF_NAME" == "release/control-center-v2.0.0" ]]; then TAG=dev-control-center-v2-test; fi
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" \
               --title "Latest development PBW" --prerelease \
               --notes "Rolling continuous-native-conversation branch development build. Install the .pbw directly; GitHub Actions artifacts are ZIP archives."
           fi
-          gh release upload dev-continuous-native-conversation direct-download/home-assistant-ai.pbw --clobber
+          gh release upload "$TAG" direct-download/home-assistant-control-center.pbw --clobber
           echo "### Direct PBW download" >> "$GITHUB_STEP_SUMMARY"
-          echo "[Download home-assistant-ai.pbw](https://github.com/$GITHUB_REPOSITORY/releases/download/dev-continuous-native-conversation/home-assistant-ai.pbw)" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download home-assistant-control-center.pbw](https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/home-assistant-control-center.pbw)" >> "$GITHUB_STEP_SUMMARY"

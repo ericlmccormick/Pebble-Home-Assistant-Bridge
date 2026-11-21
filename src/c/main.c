@@ -4,6 +4,12 @@
 
 #include <pebble.h>
 #include "ha_audio.h"
+void controls_open(void);
+void controls_home_open(void);
+void controls_apply_settings(bool large,bool dark);
+void controls_set_theme_mode(int theme_mode);
+void controls_receive(DictionaryIterator *iter,const char *command);
+static void open_devices(ClickRecognizerRef recognizer, void *context) { controls_open(); }
 // The plugin API does not expose a raw, continuous microphone stream.
 // All voice input uses PebbleOS system dictation and Bridge conversation.
 #define MAX_TEXT_LENGTH 2048
@@ -52,9 +58,34 @@ static AppTimer *s_pinwheel_timer = NULL;
 static int s_pinwheel_angle = 0;                
 static DictationSession *s_dictation_session;
 static bool s_auto_send = true;
+static bool s_large_text = false;
+// Persisted presentation state is restored before either window is created.
+// These keys are separate from the existing volume key 100 and catalog keys.
+#define PERSIST_KEY_THEME_DARK 101
+#define PERSIST_KEY_THEME_MODE 102
+#define PERSIST_KEY_LARGE_TEXT 103
+#define PERSIST_KEY_SUNRISE_MIN 104
+#define PERSIST_KEY_SUNSET_MIN 105
+#define PERSIST_KEY_SOLAR_SYNC_AT 106
+static bool s_theme_dark = false;
+static int s_theme_mode=2;
 static int s_haptic_level = 2; // 0 off, 1 low, 2 medium, 3 high
 static TextLayer *s_thinking_transcript_layer;
-static char s_thinking_transcript[256];   
+static char s_thinking_transcript[256];
+ // Use the same title sizes as Control Center menus: Normal=18, Large=24.
+ // Keep enough room for a multiline spoken transcript on the smaller watches.
+static void update_thinking_transcript_font(void) {
+  if (!s_thinking_transcript_layer) return;
+  text_layer_set_font(s_thinking_transcript_layer, fonts_get_system_font(
+      s_large_text ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD));
+  if (s_main_window) {
+    GRect b = layer_get_bounds(window_get_root_layer(s_main_window));
+    const int height = s_large_text ? 106 : 74;
+    layer_set_frame(text_layer_get_layer(s_thinking_transcript_layer),
+        GRect(8, b.size.h - height - 5, b.size.w - 18, height));
+  }
+}
+   
 static char s_ha_text[MAX_TEXT_LENGTH];     
 
 // =========================================================================
@@ -94,7 +125,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
   GPoint center = grect_center_point(&bounds);  
   int radius = 9;                               
-  graphics_context_set_stroke_color(ctx, GColorBlack); 
+  graphics_context_set_stroke_color(ctx, s_theme_dark ? GColorWhite : GColorBlack); 
   graphics_context_set_stroke_width(ctx, 3);    
   for(int i = 0; i < 4; i++) {                  
      int32_t angle = TRIG_MAX_ANGLE * (s_pinwheel_angle + i * 90) / 360; 
@@ -106,7 +137,7 @@ static void pinwheel_update_proc(Layer *layer, GContext *ctx) {
 
 static void arrow_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);        
-  graphics_context_set_stroke_color(ctx, GColorBlack); 
+  graphics_context_set_stroke_color(ctx, s_theme_dark ? GColorWhite : GColorBlack); 
   graphics_context_set_stroke_width(ctx, 3);    
   int y = bounds.size.h / 2;                    
   int x_start = 0;                              
@@ -170,6 +201,27 @@ static void down_volume_handler(ClickRecognizerRef recognizer,void *context){
   ha_haptic();show_volume_indicator();
 }
 #endif
+// Shared with the Control Center's on-watch Volume settings page.
+// Use the exact same persisted volume and audio mixer as the voice UI.
+int controls_voice_volume_percent(void){
+#ifdef PBL_SPEAKER
+  return (int)(s_volume*100.0f+0.5f);
+#else
+  return -1;
+#endif
+}
+void controls_voice_volume_change(int direction){
+#ifdef PBL_SPEAKER
+  int pct=controls_voice_volume_percent()+10*(direction>=0?1:-1);
+  if(pct<0)pct=0;
+  if(pct>100)pct=100;
+  s_volume=pct/100.0f;
+  ha_audio_set_volume(s_volume);
+  persist_write_int(PERSIST_KEY_VOLUME,pct);
+#else
+  (void)direction;
+#endif
+}
 // Legacy SDK fallback: dictation produces recognized text, not raw PCM.
 // Reopen Pebble's dictation UI after each Home Assistant answer finishes.
 // Back on the Pebble dictation overlay is delivered as a rejected transcription;
@@ -244,6 +296,15 @@ static void select_short_click_handler(ClickRecognizerRef recognizer, void *cont
   }
 }
 
+void controls_start_voice(void){
+  ha_audio_stop();
+  if(s_conversation_mode)conversation_disable();
+  // The home menu is popped without animation. Start PebbleOS dictation
+  // synchronously so the old idle "Press Select" screen never flashes.
+  set_ui_state(UI_STATE_IDLE);
+  select_short_click_handler(NULL,NULL);
+}
+
 static void select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
   conversation_toggle();
 }
@@ -260,7 +321,7 @@ static void exit_back_click_handler(ClickRecognizerRef recognizer, void *context
   if (s_current_state == UI_STATE_THINKING) {
     return;
   }
-  window_stack_pop(true);
+  controls_home_open();
 }
 
 static void results_back_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -268,6 +329,7 @@ static void results_back_click_handler(ClickRecognizerRef recognizer, void *cont
   conversation_disable();
   set_status(NULL);
   set_ui_state(UI_STATE_IDLE);
+  controls_home_open();
 }
 
 static void window_click_config_provider(void *context) {
@@ -280,9 +342,8 @@ static void window_click_config_provider(void *context) {
     window_single_repeating_click_subscribe(BUTTON_ID_DOWN, 100, (ClickHandler) scroll_layer_scroll_down_click_handler);
     
     window_single_click_subscribe(BUTTON_ID_SELECT, select_short_click_handler);
-    window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL); 
- 
-    
+    window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL);
+
     #ifdef PBL_SPEAKER
       window_long_click_subscribe(BUTTON_ID_UP, 500, up_volume_handler, NULL);
       window_long_click_subscribe(BUTTON_ID_DOWN, 500, down_volume_handler, NULL);
@@ -290,11 +351,11 @@ static void window_click_config_provider(void *context) {
   } else {
     window_single_click_subscribe(BUTTON_ID_BACK, exit_back_click_handler);
     window_single_click_subscribe(BUTTON_ID_SELECT, select_short_click_handler);
-    window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL); 
- 
-    
+    window_long_click_subscribe(BUTTON_ID_SELECT, 500, select_long_click_handler, NULL);
+    window_single_click_subscribe(BUTTON_ID_UP, open_devices);
+
     #ifdef PBL_SPEAKER
-      window_single_click_subscribe(BUTTON_ID_UP, up_volume_handler);    
+      window_long_click_subscribe(BUTTON_ID_UP, 500, up_volume_handler, NULL);    
       window_single_click_subscribe(BUTTON_ID_DOWN, down_volume_handler);  
     #endif
   }
@@ -315,7 +376,7 @@ static void set_ui_state(UIState state) {
       if (s_thinking_transcript_layer)
         layer_set_hidden(text_layer_get_layer(s_thinking_transcript_layer), true);
       layer_set_hidden(scroll_layer_get_layer(s_scroll_layer), true);
-      layer_set_hidden(s_arrow_layer, false);   
+      layer_set_hidden(s_arrow_layer, true);   
       layer_set_hidden(s_pinwheel_layer, true);  
       text_layer_set_text(s_prompt_layer,
         s_conversation_mode ?
@@ -363,6 +424,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   Tuple *command_tuple = dict_find(iterator, MESSAGE_KEY_COMMAND); 
   if (!command_tuple) return;                   
 
+  if (strncmp(command_tuple->value->cstring, "CTRL_", 5) == 0) { controls_receive(iterator,command_tuple->value->cstring); return; }
   if (strncmp(command_tuple->value->cstring, "TEXT_RESPONSE", 13) == 0) {
     bool no_audio=strcmp(command_tuple->value->cstring,"TEXT_RESPONSE_NO_AUDIO")==0;
     if(no_audio)ha_audio_stop();
@@ -393,6 +455,59 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   }
     else if (strcmp(command_tuple->value->cstring, "SETTINGS") == 0) {
       Tuple *font_tuple = dict_find(iterator, MESSAGE_KEY_FONT_SIZE);
+      Tuple *large_tuple = dict_find(iterator, MESSAGE_KEY_LARGE_TEXT);
+      Tuple *theme_tuple = dict_find(iterator, MESSAGE_KEY_THEME_DARK);
+      Tuple *theme_mode_tuple = dict_find(iterator, MESSAGE_KEY_THEME_MODE_CODE);
+      Tuple *sunrise_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SUNRISE_MIN);
+      Tuple *sunset_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SUNSET_MIN);
+      Tuple *solar_sync_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SOLAR_SYNC_AT);
+      if(theme_mode_tuple){
+        s_theme_mode=theme_mode_tuple->value->int32;
+        if(s_theme_mode<0||s_theme_mode>2)s_theme_mode=2;
+        controls_set_theme_mode(s_theme_mode);
+        persist_write_int(PERSIST_KEY_THEME_MODE,s_theme_mode);
+      }
+      if(large_tuple){
+        s_large_text=large_tuple->value->int32!=0;
+        persist_write_int(PERSIST_KEY_LARGE_TEXT,s_large_text?1:0);
+      }
+      if(sunrise_tuple&&sunset_tuple&&solar_sync_tuple){
+        int sunrise=sunrise_tuple->value->int32;
+        int sunset=sunset_tuple->value->int32;
+        int32_t synced=solar_sync_tuple->value->int32;
+        if(sunrise>=0&&sunrise<1440&&sunset>sunrise&&sunset<1440&&synced>0){
+          persist_write_int(PERSIST_KEY_SUNRISE_MIN,sunrise);
+          persist_write_int(PERSIST_KEY_SUNSET_MIN,sunset);
+          persist_write_int(PERSIST_KEY_SOLAR_SYNC_AT,synced);
+        }
+      }
+      if(theme_tuple){
+        s_theme_dark=theme_tuple->value->int32!=0;
+        persist_write_int(PERSIST_KEY_THEME_DARK,s_theme_dark?1:0);
+      }
+      controls_apply_settings(s_large_text,s_theme_dark);
+      if(s_main_window)window_set_background_color(s_main_window,s_theme_dark?GColorBlack:GColorWhite);
+      if(s_text_layer){
+        text_layer_set_background_color(s_text_layer,s_theme_dark?GColorBlack:GColorWhite);
+        text_layer_set_text_color(s_text_layer,s_theme_dark?GColorWhite:GColorBlack);
+      }
+      if(s_prompt_layer){
+        text_layer_set_text_color(s_prompt_layer,s_theme_dark?GColorWhite:GColorBlack);
+        text_layer_set_background_color(s_prompt_layer,s_theme_dark?GColorBlack:GColorWhite);
+      }
+      if(s_title_layer){
+        text_layer_set_text_color(s_title_layer,s_theme_dark?GColorWhite:GColorBlack);
+        text_layer_set_background_color(s_title_layer,s_theme_dark?GColorBlack:GColorWhite);
+      }
+      if(s_thinking_transcript_layer){
+        text_layer_set_text_color(s_thinking_transcript_layer,s_theme_dark?GColorWhite:GColorBlack);
+        update_thinking_transcript_font();
+      }
+      // The Home Assistant logo artwork is dark. Give it a constant
+      // white backing instead of letting black pixels disappear at night.
+      if(s_logo_layer)bitmap_layer_set_background_color(s_logo_layer,GColorWhite);
+      if(s_pinwheel_layer)layer_mark_dirty(s_pinwheel_layer);
+      if(s_arrow_layer)layer_mark_dirty(s_arrow_layer);
       Tuple *auto_tuple = dict_find(iterator, MESSAGE_KEY_AUTO_SEND);
       Tuple *haptic_tuple = dict_find(iterator, MESSAGE_KEY_HAPTIC_LEVEL);
       if (auto_tuple) s_auto_send = auto_tuple->value->int32 != 0;
@@ -405,10 +520,15 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         dictation_session_enable_confirmation(s_dictation_session, !s_auto_send);
       if (font_tuple) {
         int new_size = font_tuple->value->int32;
+        if(large_tuple)new_size=s_large_text?28:24;
         if (new_size <= 14) text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
         else if (new_size <= 18) text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
         else if (new_size <= 24) text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
         else text_layer_set_font(s_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_28));
+        update_text_layout();
+      }
+      if(!font_tuple && large_tuple && s_text_layer){
+        text_layer_set_font(s_text_layer,fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_28:FONT_KEY_GOTHIC_24));
         update_text_layout();
       }
     }
@@ -510,6 +630,7 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
     if (s_conversation_mode && s_dictation_fallback) conversation_disable();
     set_ui_state(UI_STATE_IDLE);
     set_status(NULL);
+    if(cancelled)controls_home_open();
     if (!cancelled) {
       const char *reason = "Speech recognition failed";
       if (status == DictationSessionStatusFailureNoSpeechDetected) reason = "No speech detected";
@@ -579,6 +700,7 @@ static void main_window_load(Window *window) {
  
 
   // Same idle-screen bitmap layout as Pebble Gemini, now using Home Assistant.
+  bitmap_layer_set_background_color(s_logo_layer,GColorWhite);
   s_logo_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_HOME_ASSISTANT_LOGO);
   if (s_logo_bitmap) {
     bitmap_layer_set_bitmap(s_logo_layer, s_logo_bitmap);
@@ -596,8 +718,7 @@ static void main_window_load(Window *window) {
 
   s_thinking_transcript_layer = text_layer_create(
       GRect(8, bounds.size.h - 79, bounds.size.w - 18, 74));
-  text_layer_set_font(s_thinking_transcript_layer,
-                      fonts_get_system_font(FONT_KEY_GOTHIC_18));
+  update_thinking_transcript_font();
   text_layer_set_text_color(s_thinking_transcript_layer, GColorBlack);
   text_layer_set_background_color(s_thinking_transcript_layer, GColorClear);
   text_layer_set_text(s_thinking_transcript_layer, "");
@@ -622,6 +743,7 @@ static void main_window_load(Window *window) {
       text_layer_set_background_color(volume_hints[i], GColorClear);
       text_layer_set_text_color(volume_hints[i], GColorBlack);
       layer_add_child(s_idle_layer, text_layer_get_layer(volume_hints[i]));
+      layer_set_hidden(text_layer_get_layer(volume_hints[i]),true);
     }
   #endif
 #endif
@@ -686,6 +808,35 @@ static void main_window_unload(Window *window) {
 // =========================================================================
 
 static void init() {
+  // Restore last effective appearance synchronously before the initial
+  // window_stack_push. Auto mode will be refined by a newer phone solar
+  // calculation later, without an initial incorrect Day-theme frame.
+  if(persist_exists(PERSIST_KEY_THEME_DARK))
+    s_theme_dark=persist_read_int(PERSIST_KEY_THEME_DARK)!=0;
+  if(persist_exists(PERSIST_KEY_THEME_MODE)){
+    int mode=persist_read_int(PERSIST_KEY_THEME_MODE);
+    if(mode>=0&&mode<=2)s_theme_mode=mode;
+  }
+  if(persist_exists(PERSIST_KEY_LARGE_TEXT))
+    s_large_text=persist_read_int(PERSIST_KEY_LARGE_TEXT)!=0;
+  // Auto mode should follow the CURRENT clock, not merely the last theme
+  // received from the phone. Cached solar times can be 1-3 days old.
+  if(s_theme_mode==2&&persist_exists(PERSIST_KEY_SUNRISE_MIN)&&
+     persist_exists(PERSIST_KEY_SUNSET_MIN)&&persist_exists(PERSIST_KEY_SOLAR_SYNC_AT)){
+    time_t now=time(NULL);
+    int32_t sync=persist_read_int(PERSIST_KEY_SOLAR_SYNC_AT);
+    if(now>=sync&&now-sync<=72*60*60){
+      int rise=persist_read_int(PERSIST_KEY_SUNRISE_MIN);
+      int set=persist_read_int(PERSIST_KEY_SUNSET_MIN);
+      struct tm *local=localtime(&now);
+      if(local&&rise>=0&&rise<1440&&set>rise&&set<1440){
+        int minute=local->tm_hour*60+local->tm_min;
+        s_theme_dark=minute<rise||minute>=set;
+      }
+    }
+  }
+  controls_set_theme_mode(s_theme_mode);
+  controls_apply_settings(s_large_text,s_theme_dark);
   ha_audio_init();
   #ifdef PBL_SPEAKER
     if (persist_exists(PERSIST_KEY_VOLUME)) s_volume = persist_read_int(PERSIST_KEY_VOLUME) / 100.0f;
@@ -704,7 +855,8 @@ static void init() {
   });
   
   window_set_click_config_provider(s_main_window, window_click_config_provider);
-  window_stack_push(s_main_window, true);       
+  window_stack_push(s_main_window, true);
+  controls_home_open();
 }
 
 static void deinit() {
