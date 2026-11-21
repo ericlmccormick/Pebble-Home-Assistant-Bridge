@@ -9,6 +9,7 @@ assert(c.includes('s_large_text ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_B
 assert(c.includes('const int height = s_large_text ? 106 : 74'), 'Enlarge transcript bounds for large text');
 const settings=c.slice(c.indexOf('strcmp(command_tuple->value->cstring, "SETTINGS")'),c.indexOf('strcmp(command_tuple->value->cstring, "HAPTIC_PREVIEW")'));
 assert(settings.includes('update_thinking_transcript_font();'), 'Apply new font immediately when settings change');
-const initial=c.slice(c.indexOf('s_thinking_transcript_layer = text_layer_create'),c.indexOf('layer_set_hidden(text_layer_get_layer(s_thinking_transcript_layer), true)'));
+const start=c.indexOf('s_thinking_transcript_layer = text_layer_create');
+const initial=c.slice(start,c.indexOf('layer_set_hidden(text_layer_get_layer(s_thinking_transcript_layer), true)',start));
 assert(initial.includes('update_thinking_transcript_font();'), 'Restore persisted normal/large choice at initial load');
 console.log('Normal/large voice-thinking transcript sizing passed');
