@@ -737,6 +737,7 @@ static void list_load(Window *w){
   layer_add_child(window_get_root_layer(w),text_layer_get_layer(s_hint));
 }
 static void list_unload(Window *w){
+  fan_stop();
   menu_layer_destroy(s_menu);s_menu=NULL;
   text_layer_destroy(s_hint);s_hint=NULL;
   window_destroy(s_list);s_list=NULL;
@@ -747,7 +748,8 @@ static void list_push(void){
   if(s_list)return;
   s_list=window_create();
   window_set_window_handlers(s_list,(WindowHandlers){
-    .load=list_load,.unload=list_unload
+    .load=list_load,.unload=list_unload,
+    .appear=list_appear,.disappear=list_disappear
   });
   window_stack_push(s_list,true);
 }
