@@ -42,6 +42,8 @@ jobs:
         run: node tests/status-concurrency.test.cjs
       - name: Phone-only startup state prefetch regression
         run: node tests/startup-prefetch.test.cjs
+      - name: Voice Thinking transcript follows Normal/Large menu fonts
+        run: node tests/voice-thinking-font.test.cjs
       - name: Static watch SDK interface validation
         run: |
           python3 - <<'PY'
