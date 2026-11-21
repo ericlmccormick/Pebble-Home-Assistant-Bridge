@@ -57,7 +57,7 @@ jobs:
           mkdir -p store-screenshots
           timeout 150s pebble install --emulator "$PLATFORM" --vnc
           sleep 4
-          timeout 90s pebble screenshot --no-open --emulator "$PLATFORM" --vnc "store-screenshots/home-assistant-ai-$PLATFORM.png"
+          timeout 90s pebble screenshot --no-open --emulator "$PLATFORM" --vnc "store-screenshots/home-assistant-control-center-$PLATFORM.png"
       - name: Validate PNG and native screen resolution
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -67,7 +67,7 @@ jobs:
           python3 - <<'PY'
           import os,struct
           from pathlib import Path
-          p=Path('store-screenshots')/('home-assistant-ai-'+os.environ['PLATFORM']+'.png')
+          p=Path('store-screenshots')/('home-assistant-control-center-'+os.environ['PLATFORM']+'.png')
           data=p.read_bytes()
           assert data[:8]==bytes((137,80,78,71,13,10,26,10))
           assert data[12:16]==b'IHDR'
@@ -98,7 +98,7 @@ jobs:
           ls -lh store-screenshots
       - uses: actions/upload-artifact@v4
         with:
-          name: home-assistant-ai-store-screenshots
+          name: home-assistant-control-center-store-screenshots
           path: store-screenshots/*.png
           retention-days: 90
           if-no-files-found: error
