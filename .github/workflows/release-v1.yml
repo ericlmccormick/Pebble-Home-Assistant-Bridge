@@ -1,4 +1,4 @@
-name: Publish Home Assistant Control Center 2.0.0
+name: Publish Home Assistant Control Center 2.1.0
 on:
   workflow_dispatch:
   push:
@@ -28,7 +28,7 @@ jobs:
           enable-cache: false
       - name: Validate Control Center manifest and shared audio SDK
         run: |
-          node -e "const p=require('./package.json');if(p.version!=='2.0.0'||p.pebble.projectType!=='native')process.exit(1)"
+          node -e "const p=require('./package.json');if(p.version!=='2.1.0'||p.pebble.projectType!=='native')process.exit(1)"
           node --check src/pkjs/index.js
           node --check src/pkjs/ha_audio.js
           node tests/audio-flow.test.cjs
@@ -54,11 +54,11 @@ jobs:
             echo "Expected one PBW; got ${#files[@]}" >&2
             exit 1
           fi
-          cp "${files[0]}" home-assistant-control-center-v2.0.0.pbw
+          cp "${files[0]}" home-assistant-control-center-v2.1.0.pbw
       - uses: actions/upload-artifact@v4
         with:
-          name: home-assistant-control-center-v2.0.0
-          path: home-assistant-control-center-v2.0.0.pbw
+          name: home-assistant-control-center-v2.1.0
+          path: home-assistant-control-center-v2.1.0.pbw
           if-no-files-found: error
       - name: Publish stable versioned GitHub release
         env:
@@ -66,13 +66,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! gh release view v2.0.0 >/dev/null 2>&1; then
-            gh release create v2.0.0 home-assistant-control-center-v2.0.0.pbw \
+          if ! gh release view v2.1.0 >/dev/null 2>&1; then
+            gh release create v2.1.0 home-assistant-control-center-v2.1.0.pbw \
               --target "$GITHUB_SHA" \
-              --title "Home Assistant Control Center 2.0.0" \
-              --notes "Home Assistant Control Center for Pebble: room-based device navigation, status refresh, direct controls and detailed settings, secure doors, and voice assistant. Requires Home Assistant Bridge 1.1.0." \
+              --title "Home Assistant Control Center 2.1.0" \
+              --notes "Home Assistant Control Center for Pebble: Compact and round watch layouts, wrapped device status and color values, and round voice reply paging. Requires Home Assistant Bridge 1.1.0." \
               --latest
           else
-            echo 'Stable v2.0.0 already exists. Refusing to overwrite.' >&2; exit 1
+            echo 'Stable v2.1.0 already exists. Refusing to overwrite.' >&2; exit 1
           fi
-          echo "Stable PBW: https://github.com/$GITHUB_REPOSITORY/releases/download/v2.0.0/home-assistant-control-center-v2.0.0.pbw" >> "$GITHUB_STEP_SUMMARY"
+          echo "Stable PBW: https://github.com/$GITHUB_REPOSITORY/releases/download/v2.1.0/home-assistant-control-center-v2.1.0.pbw" >> "$GITHUB_STEP_SUMMARY"

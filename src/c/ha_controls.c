@@ -121,7 +121,7 @@ void controls_apply_settings(bool large,bool dark){
   if(s_hint){
     text_layer_set_background_color(s_hint,ui_bg());
     text_layer_set_text_color(s_hint,ui_fg());
-    text_layer_set_font(s_hint,sub_font());
+    text_layer_set_font(s_hint,PBL_IF_ROUND_ELSE(fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),sub_font()));
   }
 }
 static bool send_command(const char *command,int index){
@@ -322,6 +322,21 @@ static GRect aligned_row_text(const char *label,GFont font,GRect slot,bool wrap)
   if(y+h>slot.origin.y+slot.size.h)y=slot.origin.y+slot.size.h-h;
   return GRect(slot.origin.x,y,slot.size.w,h);
 }
+static int device_status_left(void) { return PBL_IF_ROUND_ELSE(56,42); }
+static int device_status_width(int width, bool favorite) {
+  return width-device_status_left()-(favorite?PBL_IF_ROUND_ELSE(25,21):PBL_IF_ROUND_ELSE(16,7));
+}
+static GRect device_status_box(const ControlRow *row, int width) {
+  int available=device_status_width(width,row->favorite);
+  int y=s_large_text?33:24;
+  int height=s_large_text?25:23;
+  if(row->subtitle[0] && available>0) {
+    GSize size=graphics_text_layout_get_content_size(row->subtitle,sub_font(),
+      GRect(0,0,available,84),GTextOverflowModeWordWrap,GTextAlignmentLeft);
+    if(size.h+3>height)height=size.h+3;
+  }
+  return GRect(device_status_left(),y,available,height);
+}
 static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
   bool active=menu_cell_layer_is_highlighted(cell);
@@ -344,13 +359,12 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
   int catalog_index=catalog_index_for(idx);
   if(catalog_index<0)return;
   ControlRow *r=&s_rows[catalog_index];
-  int x=PBL_IF_ROUND_ELSE(35,8);
+  int x=PBL_IF_ROUND_ELSE(22,8);
   paint_badge(ctx,GPoint(x+13,b.size.h/2),r->kind,active,r->state);
   // Name high, state below: reserve separate lines at both font sizes.
   // Keep the canonical state in r->state for icon fill and secure controls.
-  int left=x+34;
-  int right=r->favorite?PBL_IF_ROUND_ELSE(34,21):PBL_IF_ROUND_ELSE(15,7);
-  int width=b.size.w-left-right;
+  int left=device_status_left();
+  int width=device_status_width(b.size.w,r->favorite);
   graphics_context_set_text_color(ctx,cell_fg(active));
   // Large mode has two nonoverlapping text bands: title at the top,
   // subtitle/status below. Single-line ellipsis avoids hidden lower text.
@@ -362,12 +376,11 @@ static void draw_cell(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data)
     ((r->kind==5||r->kind==6||r->kind==7)?"Tap to run":"Reading...");
   graphics_context_set_text_color(ctx,cell_sub(active));
   graphics_draw_text(ctx,subtitle,sub_font(),
-    GRect(left,s_large_text?33:24,width,s_large_text?25:23),
-    GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
+    device_status_box(r,b.size.w),GTextOverflowModeWordWrap,GTextAlignmentLeft,NULL);
   if(r->favorite){
     graphics_context_set_text_color(ctx,cell_sub(active));
     graphics_draw_text(ctx,"*",fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-      GRect(b.size.w-PBL_IF_ROUND_ELSE(33,18),(b.size.h-25)/2,15,25),
+      GRect(b.size.w-PBL_IF_ROUND_ELSE(24,18),(b.size.h-25)/2,15,25),
       GTextOverflowModeFill,GTextAlignmentCenter,NULL);
   }
 }
@@ -485,8 +498,14 @@ static uint16_t num_rows(MenuLayer *m,uint16_t section,void *data){
 }
 
 static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){
-  // Home screen retains two-line descriptions; device menu rows are compact.
-  return m==s_home_menu?row_height():(s_large_text?64:50);
+  if(m==s_home_menu)return row_height();
+  int height=s_large_text?64:50;
+  int index=catalog_index_for(idx);
+  if(index<0)return height;
+  int width=layer_get_bounds(menu_layer_get_layer(m)).size.w;
+  GRect status=device_status_box(&s_rows[index],width);
+  int bottom=status.origin.y+status.size.h+2;
+  return bottom>height?bottom:height;
 }
 
 static bool list_has_running_fan(void){
@@ -514,26 +533,41 @@ static void detail_draw(Layer *layer,GContext *ctx){
   if(s_detail_index<0||s_detail_index>=s_count)return;
   ControlRow *r=&s_rows[s_detail_index];
   GRect b=layer_get_bounds(layer);
+  const int top_margin = PBL_IF_ROUND_ELSE(36, 10);
+  const int room_y = PBL_IF_ROUND_ELSE(19, 3);
+  const int name_inset = PBL_IF_ROUND_ELSE(24, 10);
+  const int name_y = PBL_IF_ROUND_ELSE(37, 24);
+  const int status_y = b.size.h >= 200 ? 79 : 75;
   graphics_context_set_text_color(ctx,ui_muted());
   graphics_draw_text(ctx,r->room,fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-    GRect(10,3,b.size.w-20,21),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+    GRect(top_margin,room_y,b.size.w-2*top_margin,21),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
   graphics_context_set_text_color(ctx,ui_fg());
-  graphics_draw_text(ctx,r->name,fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-    GRect(10,24,b.size.w-20,47),GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
+  GRect name_box = GRect(name_inset,name_y,b.size.w-2*name_inset,status_y-name_y);
+  GFont name_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GSize title = graphics_text_layout_get_content_size(r->name,name_font,
+    GRect(0,0,name_box.size.w,120),GTextOverflowModeWordWrap,GTextAlignmentCenter);
+  if (title.h > name_box.size.h)
+    name_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  graphics_draw_text(ctx,r->name,name_font,name_box,
+    GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
   const char *status=strcmp(r->state,"on")==0?"ON":
     strcmp(r->state,"off")==0?"OFF":r->state;
-  int status_y=b.size.h>=200?79:68;
-  graphics_draw_text(ctx,status,fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
-    GRect(10,status_y,b.size.w-20,36),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+  bool expanded=r->subtitle[0] && strlen(r->subtitle)>10 && strcmp(r->subtitle,r->state)!=0;
+  if(expanded)status=r->subtitle;
+  int level_y = status_y + (expanded ? 34 : PBL_IF_ROUND_ELSE(29, 31));
+  int state_inset=PBL_IF_ROUND_ELSE(23,8);
+  graphics_draw_text(ctx,status,fonts_get_system_font(expanded ? FONT_KEY_GOTHIC_14_BOLD : FONT_KEY_GOTHIC_28_BOLD),
+    GRect(state_inset,status_y,b.size.w-2*state_inset,36),
+    expanded ? GTextOverflowModeWordWrap : GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
   if(s_detail_loading){
     graphics_draw_text(ctx,"Reading state...",fonts_get_system_font(FONT_KEY_GOTHIC_18),
-      GRect(8,status_y+37,b.size.w-16,27),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+      GRect(PBL_IF_ROUND_ELSE(24,8),level_y,b.size.w-PBL_IF_ROUND_ELSE(48,16),27),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
   }else if(s_detail_adjustable){
     char level[24];
     if(s_detail_level<0)snprintf(level,sizeof(level),"Level: --");
     else snprintf(level,sizeof(level),"%d%%",s_detail_level);
     graphics_draw_text(ctx,level,fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-      GRect(10,status_y+36,b.size.w-20,31),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
+      GRect(10,level_y,b.size.w-20,31),GTextOverflowModeTrailingEllipsis,GTextAlignmentCenter,NULL);
     if(b.size.h>=190&&s_detail_level>=0){
       GRect track=GRect(22,b.size.h-60,b.size.w-44,10);
       graphics_context_set_stroke_color(ctx,ui_fg());
@@ -547,10 +581,11 @@ static void detail_draw(Layer *layer,GContext *ctx){
     s_detail_level_pending?"SELECT: apply level":
     s_detail_note[0]?s_detail_note:
     s_detail_secure?(s_detail_armed?"SELECT again to confirm":"SELECT: choose action"):
-    s_detail_adjustable?"UP / DOWN: level  |  SELECT: power":"SELECT: power";
+    s_detail_adjustable?"Up/Down: level\nSelect: power":"Select: power";
   graphics_context_set_text_color(ctx,ui_muted());
   graphics_draw_text(ctx,hint,fonts_get_system_font(FONT_KEY_GOTHIC_14),
-    GRect(3,b.size.h-30,b.size.w-6,29),GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
+    GRect(PBL_IF_ROUND_ELSE(33,3),b.size.h-PBL_IF_ROUND_ELSE(47,32),
+      b.size.w-PBL_IF_ROUND_ELSE(66,6),33),GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
 }
 static void detail_adjust_click(int direction){
   if(s_detail_busy||s_detail_loading||!s_detail_adjustable||s_detail_index<0)return;
@@ -709,7 +744,7 @@ static void list_disappear(Window *w){fan_stop();}
 static void list_load(Window *w){
   GRect b=layer_get_bounds(window_get_root_layer(w));
   window_set_background_color(w,ui_bg());
-  s_menu=menu_layer_create(GRect(0,0,b.size.w,b.size.h-20));
+  s_menu=menu_layer_create(GRect(0,0,b.size.w,b.size.h-PBL_IF_ROUND_ELSE(31,20)));
   menu_layer_set_callbacks(s_menu,NULL,(MenuLayerCallbacks){
     .get_num_sections=num_sections,.get_num_rows=num_rows,
     .get_header_height=room_header_height,.get_cell_height=cell_height,
@@ -724,14 +759,15 @@ static void list_load(Window *w){
   layer_add_child(window_get_root_layer(w),menu_layer_get_layer(s_menu));
   // Starting on the selected device normally scrolls its section header
   // above the viewport. Force the actual scroll offset to top on entry.
-  if(s_mode==0){
+  if(s_mode==0 && PBL_IF_ROUND_ELSE(false,true)){
     menu_layer_set_selected_index(s_menu,(MenuIndex){.section=0,.row=0},MenuRowAlignTop,false);
     scroll_layer_set_content_offset(menu_layer_get_scroll_layer(s_menu),GPoint(0,0),false);
   }
-  s_hint=text_layer_create(GRect(0,b.size.h-20,b.size.w,20));
+  s_hint=text_layer_create(PBL_IF_ROUND_ELSE(
+    GRect(35,b.size.h-38,b.size.w-70,21),GRect(0,b.size.h-20,b.size.w,20)));
   text_layer_set_background_color(s_hint,ui_bg());
   text_layer_set_text_color(s_hint,ui_fg());
-  text_layer_set_font(s_hint,sub_font());
+  text_layer_set_font(s_hint,PBL_IF_ROUND_ELSE(fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),sub_font()));
   text_layer_set_text_alignment(s_hint,GTextAlignmentCenter);
   text_layer_set_text(s_hint,s_hint_text);
   layer_add_child(window_get_root_layer(w),text_layer_get_layer(s_hint));
@@ -815,7 +851,7 @@ static void settings_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *d
   graphics_context_set_text_color(ctx,fg);
   graphics_draw_text(ctx,settings_names[idx->row],
     fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_24_BOLD:FONT_KEY_GOTHIC_18_BOLD),
-    GRect(10,3,b.size.w-18,s_large_text?35:26),
+    GRect(PBL_IF_ROUND_ELSE(22,10),3,b.size.w-PBL_IF_ROUND_ELSE(44,18),s_large_text?35:26),
     GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char value[40]="";
   if(idx->row==0)snprintf(value,sizeof(value),"%s",
@@ -830,7 +866,7 @@ static void settings_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *d
   graphics_context_set_text_color(ctx,cell_sub(selected));
   graphics_draw_text(ctx,value,
     fonts_get_system_font(s_large_text?FONT_KEY_GOTHIC_18:FONT_KEY_GOTHIC_14),
-    GRect(10,s_large_text?39:29,b.size.w-18,s_large_text?29:23),
+    GRect(PBL_IF_ROUND_ELSE(22,10),s_large_text?39:29,b.size.w-PBL_IF_ROUND_ELSE(44,18),s_large_text?29:23),
     GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
 }
 static void volume_settings_draw(Layer *layer,GContext *ctx){
@@ -839,7 +875,7 @@ static void volume_settings_draw(Layer *layer,GContext *ctx){
   graphics_context_set_text_color(ctx,ui_fg());
   graphics_draw_text(ctx,"Voice volume",
     fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-    GRect(10,14,b.size.w-20,40),GTextOverflowModeTrailingEllipsis,
+    GRect(PBL_IF_ROUND_ELSE(34,10),PBL_IF_ROUND_ELSE(23,14),b.size.w-PBL_IF_ROUND_ELSE(68,20),40),GTextOverflowModeTrailingEllipsis,
     GTextAlignmentCenter,NULL);
   char label[24];
   if(volume<0)snprintf(label,sizeof(label),"No speaker");
@@ -856,9 +892,9 @@ static void volume_settings_draw(Layer *layer,GContext *ctx){
       (track.size.w-4)*volume/100,track.size.h-4),0,GCornerNone);
   }
   graphics_context_set_text_color(ctx,ui_muted());
-  graphics_draw_text(ctx,"UP / DOWN: 10%    BACK: done",
+  graphics_draw_text(ctx,volume<0?"Back: done":"Up/Down: 10%\nBack: done",
     fonts_get_system_font(FONT_KEY_GOTHIC_14),
-    GRect(4,b.size.h-31,b.size.w-8,27),
+    GRect(PBL_IF_ROUND_ELSE(32,4),b.size.h-PBL_IF_ROUND_ELSE(47,34),b.size.w-PBL_IF_ROUND_ELSE(64,8),33),
     GTextOverflowModeWordWrap,GTextAlignmentCenter,NULL);
 }
 static void volume_settings_step(int direction){
@@ -956,8 +992,8 @@ static const char *home_subs[]={"Dictation and conversation","Your pinned contro
 static void home_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *data){
   GRect b=layer_get_bounds(cell);
   bool active=menu_cell_layer_is_highlighted(cell);
-  paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(40,20),b.size.h/2),(uint8_t)(idx->row+8),active,NULL);
-  int x=PBL_IF_ROUND_ELSE(60,39);
+  paint_badge(ctx,GPoint(PBL_IF_ROUND_ELSE(32,20),b.size.h/2),(uint8_t)(idx->row+8),active,NULL);
+  int x=PBL_IF_ROUND_ELSE(50,39);
   graphics_context_set_text_color(ctx,cell_fg(active));
   // Align measured visible glyphs, not the oversized logical word-wrap
   // rectangle (which made Gothic labels appear above their icon centers).
