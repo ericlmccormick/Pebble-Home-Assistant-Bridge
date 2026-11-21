@@ -71,8 +71,8 @@ const audio={diagnostics:()=>null,handleMessage:()=>false,stop:()=>{}};
 vm.runInNewContext(js,{Pebble,localStorage:storage,console,JSON,Date,Math,
   Number,String,Promise,setTimeout:cb=>{cb();return 1;},
   require:n=>n==='pebble-clay'?Clay:{create:()=>audio}},{filename:'index.js'});
-function fire(command,index,dir){
-  handlers.appmessage({payload:{COMMAND:command,CTRL_INDEX:index,CTRL_DIRECTION:dir}});
+function fire(command,index,dir,level){
+  handlers.appmessage({payload:{COMMAND:command,CTRL_INDEX:index,CTRL_DIRECTION:dir,CTRL_LEVEL:level}});
 }
 async function flush(){for(let i=0;i<12;i++)await new Promise(ok=>setImmediate(ok));}
 (async()=>{
@@ -102,6 +102,12 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(ok=>setImmediate(o
   assert(calls.some(x=>x.action==='call_service'&&x.args.domain==='fan'&&
     x.args.service==='set_percentage'&&x.args.data.percentage===20),
     'DOWN respects supported fan step');
+  fire('CTRL_SET_LEVEL',1,0,73);await flush();
+  assert(calls.some(x=>x.action==='call_service'&&x.args.domain==='fan'&&
+    x.args.service==='set_percentage'&&x.args.data.percentage===73),
+    'Touch slider commits the exact selected fan percentage');
+  assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_LEVEL===73),
+    'The detail screen receives the confirmed post-action fan percentage');
   fire('CTRL_DETAILS',2);await flush();
   assert(sent.some(x=>x.COMMAND==='CTRL_DETAIL_STATE'&&x.CTRL_ADJUSTABLE===0),
     'Non-dimmable switch has no level');
