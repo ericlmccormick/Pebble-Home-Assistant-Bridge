@@ -71,7 +71,21 @@ static bool s_theme_dark = false;
 static int s_theme_mode=2;
 static int s_haptic_level = 2; // 0 off, 1 low, 2 medium, 3 high
 static TextLayer *s_thinking_transcript_layer;
-static char s_thinking_transcript[256];   
+static char s_thinking_transcript[256];
+ // Use the same title sizes as Control Center menus: Normal=18, Large=24.
+ // Keep enough room for a multiline spoken transcript on the smaller watches.
+static void update_thinking_transcript_font(void) {
+  if (!s_thinking_transcript_layer) return;
+  text_layer_set_font(s_thinking_transcript_layer, fonts_get_system_font(
+      s_large_text ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD));
+  if (s_main_window) {
+    GRect b = layer_get_bounds(window_get_root_layer(s_main_window));
+    const int height = s_large_text ? 106 : 74;
+    layer_set_frame(text_layer_get_layer(s_thinking_transcript_layer),
+        GRect(8, b.size.h - height - 5, b.size.w - 18, height));
+  }
+}
+   
 static char s_ha_text[MAX_TEXT_LENGTH];     
 
 // =========================================================================
@@ -487,6 +501,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       }
       if(s_thinking_transcript_layer){
         text_layer_set_text_color(s_thinking_transcript_layer,s_theme_dark?GColorWhite:GColorBlack);
+        update_thinking_transcript_font();
       }
       // The Home Assistant logo artwork is dark. Give it a constant
       // white backing instead of letting black pixels disappear at night.
@@ -703,8 +718,7 @@ static void main_window_load(Window *window) {
 
   s_thinking_transcript_layer = text_layer_create(
       GRect(8, bounds.size.h - 79, bounds.size.w - 18, 74));
-  text_layer_set_font(s_thinking_transcript_layer,
-                      fonts_get_system_font(FONT_KEY_GOTHIC_18));
+  update_thinking_transcript_font();
   text_layer_set_text_color(s_thinking_transcript_layer, GColorBlack);
   text_layer_set_background_color(s_thinking_transcript_layer, GColorClear);
   text_layer_set_text(s_thinking_transcript_layer, "");
