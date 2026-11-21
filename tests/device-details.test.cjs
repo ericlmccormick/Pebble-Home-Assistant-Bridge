@@ -7,11 +7,11 @@ assert(pkg.pebble.messageKeys.includes('CTRL_LEVEL'));
 assert(pkg.pebble.messageKeys.includes('CTRL_ADJUSTABLE'));
 assert(pkg.pebble.messageKeys.includes('CTRL_DIRECTION'));
 assert(pkg.pebble.messageKeys.includes('CTRL_ADVANCED'));
-assert(c.includes('return m==s_home_menu?row_height():(s_large_text?64:50)'),
+assert(c.includes('int height=s_large_text?64:50;') && c.includes('return bottom>height?bottom:height;'),
   'Normal and Large rows leave room for two text lines');
 assert(c.includes('GRect(left,s_large_text?-3:0,width,s_large_text?34:25)'),
   'Device names move back above the middle of the icon');
-assert(c.includes('GRect(left,s_large_text?33:24,width,s_large_text?25:23)'),
+assert(c.includes('device_status_box(r,b.size.w),GTextOverflowModeWordWrap'),
   'Subtitle stays directly below device name in either theme');
 assert(pkg.pebble.messageKeys.includes('CTRL_SUBTITLE'),
   'Subtitle uses a new message key distinct from raw state');

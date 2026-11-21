@@ -8,8 +8,10 @@ assert(!c.includes('int y=slot.origin.y+(slot.size.h-h)/2+4;'));
 const draw=c.slice(c.indexOf('static void draw_cell('),c.indexOf('// A single row is below',c.indexOf('static void draw_cell(')));
 assert(draw.includes('GRect(left,s_large_text?-3:0,width,s_large_text?34:25)'),
  'Large title is positioned higher');
-assert(draw.includes('GRect(left,s_large_text?33:24,width,s_large_text?25:23)'),
- 'Status text gets its own visible text band');
+assert(draw.includes('device_status_box(r,b.size.w),GTextOverflowModeWordWrap'),
+ 'The status occupies a separate, wrapped band');
+assert(c.includes('int bottom=status.origin.y+status.size.h+2;'),
+ 'Device rows grow to display the measured status');
 assert(draw.includes('r->subtitle[0]?r->subtitle:'),'Status is read from live subtitle');
 assert(js.includes('CTRL_SUBTITLE:deviceStatusSubtitle(row,fresh)'));
 const done=c.slice(c.indexOf('if(strcmp(command,"CTRL_DONE")==0){'),c.indexOf('if(strcmp(command,"CTRL_ACTION_DONE")==0){'));

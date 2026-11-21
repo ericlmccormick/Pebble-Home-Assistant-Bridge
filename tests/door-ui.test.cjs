@@ -8,7 +8,7 @@ assert(c.includes('GRect home_label=s_large_text?aligned_row_text('),
  'Home menu text uses measured vertical alignment');
 assert(c.includes('GRect(left,s_large_text?-3:0,width,s_large_text?34:25)'),
  'Device name starts high in both Normal and Large layouts');
-assert(c.includes('GRect(left,s_large_text?33:24,width,s_large_text?25:23)'),
+assert(c.includes('device_status_box(r,b.size.w),GTextOverflowModeWordWrap'),
  'Device state is placed directly beneath the name without overlap');
 assert(c.includes('GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);'),
  'Long device names truncate rather than overlapping the status');
