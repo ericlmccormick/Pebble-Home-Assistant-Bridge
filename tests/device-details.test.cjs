@@ -15,10 +15,10 @@ assert(c.includes('GRect(left,s_large_text?33:24,width,s_large_text?25:23)'),
   'Subtitle stays directly below device name in either theme');
 assert(pkg.pebble.messageKeys.includes('CTRL_SUBTITLE'),
   'Subtitle uses a new message key distinct from raw state');
-assert(c.includes('(unknown||dimmed)?(highlighted?ui_selected_bg():ui_bg())'),
+assert(c.includes('(unknown||dimmed)?ui_bg():badge_fill(kind,false)'),
   'Unknown/off/unavailable badges remain unfilled until live status arrives');
 assert(c.includes('GColor category=kind_color(kind)'),
-  'Device type artwork keeps a distinctive category color before state loads');
+  'Device type artwork has a stable category palette');
 assert(c.includes('detail_push(index,false)'));
 assert(c.includes('send_command("CTRL_INSPECT",index)'));
 assert(c.includes('window_single_click_subscribe(BUTTON_ID_UP,detail_up_click)'));
