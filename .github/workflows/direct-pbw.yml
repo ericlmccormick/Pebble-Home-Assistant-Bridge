@@ -2,7 +2,7 @@ name: Build and publish direct PBW
 on:
   workflow_dispatch:
   push:
-    branches: [continuous-native-conversation, fix/always-refresh-visible-status]
+    branches: [continuous-native-conversation, fix/always-refresh-visible-status, 'release/control-center-v2.0.0']
     paths:
       - 'package.json'
       - 'src/**'
@@ -81,8 +81,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG=dev-always-refresh-visible-status
-          if [[ "$GITHUB_REF_NAME" != "fix/always-refresh-visible-status" ]]; then TAG=dev-continuous-native-conversation; fi
+          TAG=dev-continuous-native-conversation
+          if [[ "$GITHUB_REF_NAME" == "fix/always-refresh-visible-status" ]]; then TAG=dev-always-refresh-visible-status; fi
+          if [[ "$GITHUB_REF_NAME" == "release/control-center-v2.0.0" ]]; then TAG=dev-control-center-v2-test; fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" \
               --title "Latest development PBW" --prerelease \
