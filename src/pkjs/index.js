@@ -918,6 +918,34 @@ function controlAdjust(index,direction){
     controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
   });
 }
+// Touch slider commits only when SELECT is pressed; unlike button stepping,
+ // the phone receives the exact user-selected percentage.
+function controlSetLevel(index,requested){
+  var item=controlAt(index);
+  if(!item)return;
+  var domain=item.id.split('.')[0];
+  if(domain!=='light'&&domain!=='fan')return;
+  var level=Math.round(Number(requested));
+  if(!isFinite(level)||level<0||level>100)return;
+  pluginAction('get_state',{entity_id:item.id}).then(function(result){
+    var fresh=pluginJson(result);
+    if(!detailMeta(fresh,domain).adjustable)throw Error('Level control unavailable');
+    var service=level===0?'turn_off':domain==='fan'?'set_percentage':'turn_on';
+    var data={entity_id:item.id};
+    if(level>0){
+      if(domain==='fan')data.percentage=level;
+      else data.brightness_pct=level;
+    }
+    return pluginAction('call_service',{domain:domain,service:service,data:data});
+  }).then(function(result){
+    pluginJson(result);
+    return pluginAction('get_state',{entity_id:item.id});
+  }).then(function(result){
+    syncFreshState(index,item.row,pluginJson(result),true);
+  }).catch(function(err){
+    controlSend({COMMAND:'CTRL_ERROR',CTRL_STATUS:String(err.message||err).slice(0,26)});
+  });
+}
 function controlSecureAct(index){
   var item=controlAt(index);
   if(!item||!/^(lock|cover)$/.test(item.row.domain))return;
@@ -983,6 +1011,7 @@ Pebble.addEventListener('appmessage',function(event){
   if(d.COMMAND==='CTRL_ACT'){controlAct(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND==='CTRL_DETAILS'){controlDetails(Number(d.CTRL_INDEX));return;}
   if(d.COMMAND==='CTRL_ADJUST'){controlAdjust(Number(d.CTRL_INDEX),Number(d.CTRL_DIRECTION));return;}
+  if(d.COMMAND==='CTRL_SET_LEVEL'){controlSetLevel(Number(d.CTRL_INDEX),Number(d.CTRL_LEVEL));return;}
   if(d.COMMAND!=='DICTATION'&&d.COMMAND!=='CONV_DICTATION')return;
   var legacy=d.COMMAND==='CONV_DICTATION';
   if(!d.TEXT){replyError('No dictation captured',legacy);return;}
