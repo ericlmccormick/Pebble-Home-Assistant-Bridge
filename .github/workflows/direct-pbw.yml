@@ -68,11 +68,11 @@ jobs:
             exit 1
           fi
           mkdir -p direct-download
-          cp "${files[0]}" direct-download/home-assistant-ai.pbw
+          cp "${files[0]}" direct-download/home-assistant-control-center.pbw
       - uses: actions/upload-artifact@v4
         with:
-          name: home-assistant-ai-build
-          path: direct-download/home-assistant-ai.pbw
+          name: home-assistant-control-center-build
+          path: direct-download/home-assistant-control-center.pbw
           if-no-files-found: error
       - name: Publish directly installable PBW to GitHub Releases
         if: github.ref == 'refs/heads/continuous-native-conversation' || github.ref == 'refs/heads/fix/always-refresh-visible-status'
@@ -87,6 +87,6 @@ jobs:
               --title "Latest development PBW" --prerelease \
               --notes "Rolling continuous-native-conversation branch development build. Install the .pbw directly; GitHub Actions artifacts are ZIP archives."
           fi
-          gh release upload "$TAG" direct-download/home-assistant-ai.pbw --clobber
+          gh release upload "$TAG" direct-download/home-assistant-control-center.pbw --clobber
           echo "### Direct PBW download" >> "$GITHUB_STEP_SUMMARY"
-          echo "[Download home-assistant-ai.pbw](https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/home-assistant-ai.pbw)" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download home-assistant-control-center.pbw](https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/home-assistant-control-center.pbw)" >> "$GITHUB_STEP_SUMMARY"
