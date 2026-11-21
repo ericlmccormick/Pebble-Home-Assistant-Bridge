@@ -1,0 +1,14 @@
+'use strict';
+const fs=require('fs'),assert=require('assert');
+const c=fs.readFileSync('src/c/main.c','utf8');
+const pkg=require('../package.json');
+assert.strictEqual(pkg.version,'2.0.0','Keep release version at 2.0.0');
+assert.strictEqual(pkg.pebble.displayName,'Home Assistant Control Center');
+assert(c.includes('static void update_thinking_transcript_font(void)'), 'Shared transcript layout helper');
+assert(c.includes('s_large_text ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD'), 'Match large/normal menu title fonts');
+assert(c.includes('const int height = s_large_text ? 106 : 74'), 'Enlarge transcript bounds for large text');
+const settings=c.slice(c.indexOf('strcmp(command_tuple->value->cstring, "SETTINGS")'),c.indexOf('strcmp(command_tuple->value->cstring, "HAPTIC_PREVIEW")'));
+assert(settings.includes('update_thinking_transcript_font();'), 'Apply new font immediately when settings change');
+const initial=c.slice(c.indexOf('s_thinking_transcript_layer = text_layer_create'),c.indexOf('layer_set_hidden(text_layer_get_layer(s_thinking_transcript_layer), true)'));
+assert(initial.includes('update_thinking_transcript_font();'), 'Restore persisted normal/large choice at initial load');
+console.log('Normal/large voice-thinking transcript sizing passed');
