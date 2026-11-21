@@ -60,6 +60,9 @@ static Window *s_home=NULL,*s_list=NULL,*s_detail_window=NULL,*s_settings_window
 static Layer *s_volume_settings_layer=NULL;
 static Layer *s_detail_layer=NULL;
 static int s_detail_index=-1,s_detail_level=-1;
+static bool s_detail_level_pending=false;
+static AppTimer *s_fan_timer=NULL;
+static uint8_t s_fan_frame=0;
 static bool s_detail_adjustable=false,s_detail_busy=false,s_detail_loading=false;
 static bool s_detail_secure=false,s_detail_armed=false;
 static char s_detail_note[42]="";
@@ -180,14 +183,13 @@ static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,con
   // lightbulb, fan blades, switch or scene glyph immediately in its category
   // color, using an unfilled ring until status is known.
   GColor category=kind_color(kind);
-  GColor ink=unknown?(highlighted?ui_selected_fg():category):
-    dimmed?(highlighted?ui_selected_fg():ui_muted()):badge_ink(highlighted);
+  // Gray means OFF/unknown; active devices retain their category hue even
+  // when the row is highlighted. Contrast comes from the badge outline.
+  GColor ink=(unknown||dimmed)?ui_muted():badge_ink(false);
   graphics_context_set_fill_color(ctx,
-    (unknown||dimmed)?(highlighted?ui_selected_bg():ui_bg()):badge_fill(kind,highlighted));
+    (unknown||dimmed)?ui_bg():badge_fill(kind,false));
   graphics_fill_circle(ctx,c,14);
-  graphics_context_set_stroke_color(ctx,unknown?(highlighted?ui_selected_fg():category):
-    dimmed?(highlighted?ui_selected_fg():ui_muted()):
-    (highlighted?ui_selected_fg():ui_fg()));
+  graphics_context_set_stroke_color(ctx,(unknown||dimmed)?ui_muted():category);
   graphics_context_set_stroke_width(ctx,1);
   graphics_draw_circle(ctx,c,14);
   graphics_context_set_stroke_color(ctx,ink);
@@ -205,12 +207,21 @@ static void paint_badge(GContext *ctx,GPoint c,uint8_t kind,bool highlighted,con
       graphics_draw_round_rect(ctx,GRect(c.x-10,c.y-5,20,10),5);
       graphics_fill_circle(ctx,GPoint(c.x+4,c.y),4);
       break;
-    case 3: // 3-blade fan
+    case 3: { // 3-blade fan: animate only when its actual state is ON.
+      static const int8_t offsets[6][3][2]={
+        {{0,-7},{-6,4},{6,4}},{{4,-6},{-7,-1},{3,7}},
+        {{6,-4},{-4,-6},{-2,7}},{{7,1},{-6,-4},{-1,7}},
+        {{5,5},{0,-7},{-6,2}},{{1,7},{5,-5},{-7,-2}}
+      };
+      bool spinning=state&&strcmp(state,"on")==0;
+      int phase=spinning?s_fan_frame%6:0;
       graphics_fill_circle(ctx,c,3);
-      graphics_fill_circle(ctx,GPoint(c.x,c.y-7),4);
-      graphics_fill_circle(ctx,GPoint(c.x-7,c.y+5),4);
-      graphics_fill_circle(ctx,GPoint(c.x+7,c.y+5),4);
+      for(int blade=0;blade<3;blade++){
+        graphics_fill_circle(ctx,GPoint(c.x+offsets[phase][blade][0],
+          c.y+offsets[phase][blade][1]),4);
+      }
       break;
+    }
     case 13: // front door lock: shackle and body
       graphics_draw_round_rect(ctx,GRect(c.x-6,c.y-9,12,12),5);
       graphics_fill_rect(ctx,GRect(c.x-8,c.y-1,16,11),0,GCornerNone);
@@ -478,6 +489,27 @@ static int16_t cell_height(MenuLayer *m,MenuIndex *idx,void *data){
   return m==s_home_menu?row_height():(s_large_text?64:50);
 }
 
+static bool list_has_running_fan(void){
+  if(!s_list||!s_menu)return false;
+  for(int i=0;i<s_count;i++)
+    if(s_rows[i].kind==3&&strcmp(s_rows[i].state,"on")==0)return true;
+  return false;
+}
+static void fan_tick(void *context){
+  s_fan_timer=NULL;
+  if(!s_list||window_stack_get_top_window()!=s_list)return;
+  if(!list_has_running_fan())return;
+  s_fan_frame=(s_fan_frame+1)%6;
+  if(s_menu)menu_layer_reload_data(s_menu);
+  s_fan_timer=app_timer_register(350,fan_tick,NULL);
+}
+static void fan_schedule(void){
+  if(!s_fan_timer&&s_list&&window_stack_get_top_window()==s_list&&
+     list_has_running_fan())s_fan_timer=app_timer_register(350,fan_tick,NULL);
+}
+static void fan_stop(void){
+  if(s_fan_timer){app_timer_cancel(s_fan_timer);s_fan_timer=NULL;}
+}
 static void detail_draw(Layer *layer,GContext *ctx){
   if(s_detail_index<0||s_detail_index>=s_count)return;
   ControlRow *r=&s_rows[s_detail_index];
@@ -512,6 +544,7 @@ static void detail_draw(Layer *layer,GContext *ctx){
     }
   }
   const char *hint=s_detail_busy?"Updating...":
+    s_detail_level_pending?"SELECT: apply level":
     s_detail_note[0]?s_detail_note:
     s_detail_secure?(s_detail_armed?"SELECT again to confirm":"SELECT: choose action"):
     s_detail_adjustable?"UP / DOWN: level  |  SELECT: power":"SELECT: power";
@@ -521,6 +554,7 @@ static void detail_draw(Layer *layer,GContext *ctx){
 }
 static void detail_adjust_click(int direction){
   if(s_detail_busy||s_detail_loading||!s_detail_adjustable||s_detail_index<0)return;
+  s_detail_level_pending=false; // physical buttons keep immediate-step behavior
   DictionaryIterator *out=NULL;
   if(app_message_outbox_begin(&out)!=APP_MSG_OK||!out)return;
   dict_write_cstring(out,MESSAGE_KEY_COMMAND,"CTRL_ADJUST");
@@ -535,6 +569,20 @@ static void detail_up_click(ClickRecognizerRef recognizer,void *context){detail_
 static void detail_down_click(ClickRecognizerRef recognizer,void *context){detail_adjust_click(-1);}
 static void detail_select_click(ClickRecognizerRef recognizer,void *context){
   if(s_detail_busy||s_detail_loading||s_detail_index<0)return;
+  if(s_detail_level_pending&&s_detail_adjustable){
+    DictionaryIterator *out=NULL;
+    if(app_message_outbox_begin(&out)!=APP_MSG_OK||!out)return;
+    dict_write_cstring(out,MESSAGE_KEY_COMMAND,"CTRL_SET_LEVEL");
+    dict_write_int32(out,MESSAGE_KEY_CTRL_INDEX,s_detail_index);
+    dict_write_int32(out,MESSAGE_KEY_CTRL_LEVEL,s_detail_level);
+    dict_write_end(out);
+    if(app_message_outbox_send()==APP_MSG_OK){
+      s_detail_busy=true;s_detail_level_pending=false;
+      snprintf(s_detail_note,sizeof(s_detail_note),"Applying level...");
+      layer_mark_dirty(s_detail_layer);
+    }
+    return;
+  }
   if(s_detail_secure){
     if(!s_detail_armed){
       s_detail_armed=true;
@@ -560,6 +608,34 @@ static void detail_select_click(ClickRecognizerRef recognizer,void *context){
     s_detail_busy=true;s_detail_note[0]=0;layer_mark_dirty(s_detail_layer);
   }
 }
+
+#ifdef PBL_TOUCH
+static void detail_touch(const TouchEvent *event,void *context){
+  if(!s_detail_layer||!s_detail_adjustable||s_detail_loading||s_detail_busy||
+     s_detail_index<0||event->non_navigational)return;
+  if(event->type!=TouchEvent_Touchdown&&
+     event->type!=TouchEvent_PositionUpdate)return;
+  GRect b=layer_get_bounds(s_detail_layer);
+  if(b.size.h<190)return; // compact button-only layouts do not show a track
+  int y=event->y, x=event->x;
+  int left=24,right=b.size.w-24;
+  if(y<b.size.h-79||y>b.size.h-38)return;
+  if(x<left)x=left;
+  if(x>right)x=right;
+  int level=(x-left)*100/(right-left);
+  if(level<0)level=0;
+  if(level>100)level=100;
+  s_detail_level=level;
+  s_detail_level_pending=true; // preview only, never changes HA until Select
+  layer_mark_dirty(s_detail_layer);
+}
+static void detail_appear(Window *w){
+  touch_service_subscribe(detail_touch,NULL);
+}
+static void detail_disappear(Window *w){
+  touch_service_unsubscribe();
+}
+#endif
 static void detail_click_config(void *context){
   window_single_click_subscribe(BUTTON_ID_UP,detail_up_click);
   window_single_click_subscribe(BUTTON_ID_DOWN,detail_down_click);
@@ -567,6 +643,9 @@ static void detail_click_config(void *context){
 }
 static void detail_load(Window *w){
   window_set_background_color(w,ui_bg());
+#ifdef PBL_TOUCH
+  window_set_touch_bridge_disabled(w,true);
+#endif
   s_detail_layer=layer_create(layer_get_bounds(window_get_root_layer(w)));
   layer_set_update_proc(s_detail_layer,detail_draw);
   layer_add_child(window_get_root_layer(w),s_detail_layer);
@@ -575,17 +654,23 @@ static void detail_unload(Window *w){
   layer_destroy(s_detail_layer);s_detail_layer=NULL;
   window_destroy(s_detail_window);s_detail_window=NULL;
   s_detail_index=-1;s_detail_busy=false;s_detail_loading=false;
+  s_detail_level_pending=false;
   s_detail_secure=false;s_detail_armed=false;
 }
 static void detail_push(int index,bool fetch){
   if(s_detail_window||index<0||index>=s_count)return;
   s_detail_index=index;s_detail_level=-1;s_detail_adjustable=false;
+  s_detail_level_pending=false;
   s_detail_secure=s_rows[index].kind==4||s_rows[index].kind==13||s_rows[index].kind==14;
   s_detail_armed=false;
   s_detail_busy=true;s_detail_loading=true;s_detail_note[0]=0;
   s_detail_window=window_create();
   window_set_window_handlers(s_detail_window,(WindowHandlers){
-    .load=detail_load,.unload=detail_unload});
+    .load=detail_load,.unload=detail_unload
+#ifdef PBL_TOUCH
+    ,.appear=detail_appear,.disappear=detail_disappear
+#endif
+  });
   window_set_click_config_provider(s_detail_window,detail_click_config);
   window_stack_push(s_detail_window,true);
   if(fetch&&!send_command("CTRL_DETAILS",index)){
@@ -618,6 +703,9 @@ static void select_row(MenuLayer *m,MenuIndex *idx,void *data){
     queued?"Checking device...":"Phone busy; retry");
   if(s_hint)text_layer_set_text(s_hint,s_hint_text);
 }
+
+static void list_appear(Window *w){fan_schedule();}
+static void list_disappear(Window *w){fan_stop();}
 static void list_load(Window *w){
   GRect b=layer_get_bounds(window_get_root_layer(w));
   window_set_background_color(w,ui_bg());
@@ -930,6 +1018,7 @@ static void home_unload(Window *w){
   window_destroy(s_home);s_home=NULL;
 }
 void controls_home_open(void){
+  app_touch_navigation_enable(true); // MenuLayer swipe, tap and row activation
   catalog_restore();
   if(s_home)return;
   s_home=window_create();
@@ -969,6 +1058,7 @@ void controls_receive(DictionaryIterator *iter,const char *command){
       if(s_detail_level<0)s_detail_level=-1;
       s_detail_adjustable=adj&&adj->value->int32!=0;
       s_detail_busy=false;s_detail_loading=false;s_detail_note[0]=0;
+      s_detail_level_pending=false;
       if(s_detail_layer)layer_mark_dirty(s_detail_layer);
     }
     return;
@@ -1013,6 +1103,7 @@ void controls_receive(DictionaryIterator *iter,const char *command){
       sub?sub->value->cstring:st->value->cstring);
     // No persistence: a live state may already be stale at the next launch.
     if(s_menu)menu_layer_reload_data(s_menu);
+    fan_schedule();
     return;
   }
   if(strcmp(command,"CTRL_DONE")==0){
