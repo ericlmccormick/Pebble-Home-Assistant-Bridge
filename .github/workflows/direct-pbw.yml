@@ -38,6 +38,7 @@ jobs:
           node tests/audio-flow.test.cjs
           node tests/progressive-audio.test.cjs
           node tests/sentence-prefetch.test.cjs
+          node tests/voice-thinking-font.test.cjs
           node tests/touch-controls.test.cjs
           node tests/theme-contrast.test.cjs
           node tests/theme-startup.test.cjs
