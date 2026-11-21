@@ -4,12 +4,12 @@
     "pebble-clay": "^1.0.4"
   },
   "keywords": [],
-  "name": "pebble-home-assistant-ai",
+  "name": "pebble-home-assistant-control-center",
   "pebble": {
     "capabilities": [
       "configurable"
     ],
-    "displayName": "Home Assistant AI",
+    "displayName": "Home Assistant Control Center",
     "enableMultiJS": true,
     "messageKeys": [
       "COMMAND",
@@ -122,6 +122,6 @@
       }
     ]
   },
-  "version": "1.7.3",
-  "description": "Home Assistant Control Center with automatic live status refresh whenever cached device sections open"
+  "version": "2.0.0",
+  "description": "Home Assistant Control Center for Pebble: room navigation, live device status and controls, scenes, secure door actions, and Home Assistant Assist voice using Home Assistant Bridge."
 }
