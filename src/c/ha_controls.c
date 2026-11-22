@@ -80,6 +80,7 @@ static bool s_force_refresh_pending=false;
 static char s_refresh_note[40]="Full device discovery";
 int controls_voice_volume_percent(void);
 void controls_voice_volume_change(int direction);
+void app_set_theme_mode(int mode);
 void controls_set_theme_mode(int theme_mode){
   if(theme_mode<0||theme_mode>2)return;
   s_theme_mode=theme_mode;
@@ -855,7 +856,7 @@ static void settings_draw(GContext *ctx,const Layer *cell,MenuIndex *idx,void *d
     GTextOverflowModeTrailingEllipsis,GTextAlignmentLeft,NULL);
   char value[40]="";
   if(idx->row==0)snprintf(value,sizeof(value),"%s",
-    s_theme_mode==0?"Day":s_theme_mode==1?"Night":"Auto (Weather+)");
+    s_theme_mode==0?"Day":s_theme_mode==1?"Night":"Auto");
   if(idx->row==1)snprintf(value,sizeof(value),"%s",s_large_text?"Large":"Normal");
   if(idx->row==2){
     int volume=controls_voice_volume_percent();
@@ -933,9 +934,8 @@ static void settings_select(MenuLayer *menu,MenuIndex *idx,void *data){
   switch(idx->row){
     case 0:{
       int next=(s_theme_mode+1)%3;
-      if(!send_command("CTRL_THEME_SET",next))return;
-      controls_set_theme_mode(next);
-      if(next!=2)controls_apply_settings(s_large_text,next==1);
+      send_command("CTRL_THEME_SET",next);
+      app_set_theme_mode(next);
       break;
     }
     case 1:{

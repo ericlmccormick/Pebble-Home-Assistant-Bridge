@@ -41,7 +41,11 @@
       "CTRL_OFFSET",
       "CTRL_GRAND_TOTAL",
       "CTRL_HAS_MORE",
-      "CTRL_SUBTITLE"
+      "CTRL_SUBTITLE",
+      "VG_SUNRISE",
+      "VG_SUNSET",
+      "VG_NEXT_SUNRISE",
+      "VG_NEXT_SUNSET"
     ],
     "projectType": "native",
     "resources": {

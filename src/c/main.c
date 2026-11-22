@@ -3,6 +3,7 @@
 // =========================================================================
 
 #include <pebble.h>
+#include "solar_theme.h"
 #include "ha_audio.h"
 void controls_open(void);
 void controls_home_open(void);
@@ -61,12 +62,8 @@ static bool s_auto_send = true;
 static bool s_large_text = false;
 // Persisted presentation state is restored before either window is created.
 // These keys are separate from the existing volume key 100 and catalog keys.
-#define PERSIST_KEY_THEME_DARK 101
 #define PERSIST_KEY_THEME_MODE 102
 #define PERSIST_KEY_LARGE_TEXT 103
-#define PERSIST_KEY_SUNRISE_MIN 104
-#define PERSIST_KEY_SUNSET_MIN 105
-#define PERSIST_KEY_SOLAR_SYNC_AT 106
 static bool s_theme_dark = false;
 static int s_theme_mode=2;
 static int s_haptic_level = 2; // 0 off, 1 low, 2 medium, 3 high
@@ -416,7 +413,47 @@ static void set_ui_state(UIState state) {
 // SECTION 9: APP MESSAGE COMMUNICATIONS RECEIVER & PARSING STRUCTURES
 // =========================================================================
 
+static void apply_theme_and_font(void) {
+  s_theme_dark = solar_theme_dark(s_theme_mode);
+  controls_apply_settings(s_large_text,s_theme_dark);
+  if(s_main_window)window_set_background_color(s_main_window,s_theme_dark?GColorBlack:GColorWhite);
+  if(s_text_layer){
+    text_layer_set_background_color(s_text_layer,s_theme_dark?GColorBlack:GColorWhite);
+    text_layer_set_text_color(s_text_layer,s_theme_dark?GColorWhite:GColorBlack);
+  }
+  if(s_prompt_layer){
+    text_layer_set_text_color(s_prompt_layer,s_theme_dark?GColorWhite:GColorBlack);
+    text_layer_set_background_color(s_prompt_layer,s_theme_dark?GColorBlack:GColorWhite);
+  }
+  if(s_title_layer){
+    text_layer_set_text_color(s_title_layer,s_theme_dark?GColorWhite:GColorBlack);
+    text_layer_set_background_color(s_title_layer,s_theme_dark?GColorBlack:GColorWhite);
+  }
+  if(s_thinking_transcript_layer){
+    text_layer_set_text_color(s_thinking_transcript_layer,s_theme_dark?GColorWhite:GColorBlack);
+    update_thinking_transcript_font();
+  }
+  // The Home Assistant logo artwork is dark. Give it a constant
+  // white backing instead of letting black pixels disappear at night.
+  if(s_logo_layer)bitmap_layer_set_background_color(s_logo_layer,GColorWhite);
+  if(s_pinwheel_layer)layer_mark_dirty(s_pinwheel_layer);
+  if(s_arrow_layer)layer_mark_dirty(s_arrow_layer);
+}
+
+void app_set_theme_mode(int mode) {
+  if (mode < VG_THEME_DAY || mode > VG_THEME_AUTO) return;
+  s_theme_mode = mode;
+  persist_write_int(PERSIST_KEY_THEME_MODE, mode);
+  controls_set_theme_mode(mode);
+  apply_theme_and_font();
+}
+
+static void appearance_tick(struct tm *tick, TimeUnits units) {
+  if (s_theme_dark != solar_theme_dark(s_theme_mode)) apply_theme_and_font();
+}
+
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
+  if (solar_theme_receive(iterator)) { apply_theme_and_font(); return; }
   if(ha_audio_handle_message(iterator)){
     Tuple *cmd=dict_find(iterator,MESSAGE_KEY_COMMAND);
     if(cmd && cmd->type==TUPLE_CSTRING &&
@@ -460,11 +497,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
     else if (strcmp(command_tuple->value->cstring, "SETTINGS") == 0) {
       Tuple *font_tuple = dict_find(iterator, MESSAGE_KEY_FONT_SIZE);
       Tuple *large_tuple = dict_find(iterator, MESSAGE_KEY_LARGE_TEXT);
-      Tuple *theme_tuple = dict_find(iterator, MESSAGE_KEY_THEME_DARK);
       Tuple *theme_mode_tuple = dict_find(iterator, MESSAGE_KEY_THEME_MODE_CODE);
-      Tuple *sunrise_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SUNRISE_MIN);
-      Tuple *sunset_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SUNSET_MIN);
-      Tuple *solar_sync_tuple = dict_find(iterator, MESSAGE_KEY_THEME_SOLAR_SYNC_AT);
       if(theme_mode_tuple){
         s_theme_mode=theme_mode_tuple->value->int32;
         if(s_theme_mode<0||s_theme_mode>2)s_theme_mode=2;
@@ -475,43 +508,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         s_large_text=large_tuple->value->int32!=0;
         persist_write_int(PERSIST_KEY_LARGE_TEXT,s_large_text?1:0);
       }
-      if(sunrise_tuple&&sunset_tuple&&solar_sync_tuple){
-        int sunrise=sunrise_tuple->value->int32;
-        int sunset=sunset_tuple->value->int32;
-        int32_t synced=solar_sync_tuple->value->int32;
-        if(sunrise>=0&&sunrise<1440&&sunset>sunrise&&sunset<1440&&synced>0){
-          persist_write_int(PERSIST_KEY_SUNRISE_MIN,sunrise);
-          persist_write_int(PERSIST_KEY_SUNSET_MIN,sunset);
-          persist_write_int(PERSIST_KEY_SOLAR_SYNC_AT,synced);
-        }
-      }
-      if(theme_tuple){
-        s_theme_dark=theme_tuple->value->int32!=0;
-        persist_write_int(PERSIST_KEY_THEME_DARK,s_theme_dark?1:0);
-      }
-      controls_apply_settings(s_large_text,s_theme_dark);
-      if(s_main_window)window_set_background_color(s_main_window,s_theme_dark?GColorBlack:GColorWhite);
-      if(s_text_layer){
-        text_layer_set_background_color(s_text_layer,s_theme_dark?GColorBlack:GColorWhite);
-        text_layer_set_text_color(s_text_layer,s_theme_dark?GColorWhite:GColorBlack);
-      }
-      if(s_prompt_layer){
-        text_layer_set_text_color(s_prompt_layer,s_theme_dark?GColorWhite:GColorBlack);
-        text_layer_set_background_color(s_prompt_layer,s_theme_dark?GColorBlack:GColorWhite);
-      }
-      if(s_title_layer){
-        text_layer_set_text_color(s_title_layer,s_theme_dark?GColorWhite:GColorBlack);
-        text_layer_set_background_color(s_title_layer,s_theme_dark?GColorBlack:GColorWhite);
-      }
-      if(s_thinking_transcript_layer){
-        text_layer_set_text_color(s_thinking_transcript_layer,s_theme_dark?GColorWhite:GColorBlack);
-        update_thinking_transcript_font();
-      }
-      // The Home Assistant logo artwork is dark. Give it a constant
-      // white backing instead of letting black pixels disappear at night.
-      if(s_logo_layer)bitmap_layer_set_background_color(s_logo_layer,GColorWhite);
-      if(s_pinwheel_layer)layer_mark_dirty(s_pinwheel_layer);
-      if(s_arrow_layer)layer_mark_dirty(s_arrow_layer);
+      apply_theme_and_font();
       Tuple *auto_tuple = dict_find(iterator, MESSAGE_KEY_AUTO_SEND);
       Tuple *haptic_tuple = dict_find(iterator, MESSAGE_KEY_HAPTIC_LEVEL);
       if (auto_tuple) s_auto_send = auto_tuple->value->int32 != 0;
@@ -818,33 +815,15 @@ static void main_window_unload(Window *window) {
 // =========================================================================
 
 static void init() {
-  // Restore last effective appearance synchronously before the initial
-  // window_stack_push. Auto mode will be refined by a newer phone solar
-  // calculation later, without an initial incorrect Day-theme frame.
-  if(persist_exists(PERSIST_KEY_THEME_DARK))
-    s_theme_dark=persist_read_int(PERSIST_KEY_THEME_DARK)!=0;
+  solar_theme_load();
   if(persist_exists(PERSIST_KEY_THEME_MODE)){
     int mode=persist_read_int(PERSIST_KEY_THEME_MODE);
     if(mode>=0&&mode<=2)s_theme_mode=mode;
   }
   if(persist_exists(PERSIST_KEY_LARGE_TEXT))
     s_large_text=persist_read_int(PERSIST_KEY_LARGE_TEXT)!=0;
-  // Auto mode should follow the CURRENT clock, not merely the last theme
-  // received from the phone. Cached solar times can be 1-3 days old.
-  if(s_theme_mode==2&&persist_exists(PERSIST_KEY_SUNRISE_MIN)&&
-     persist_exists(PERSIST_KEY_SUNSET_MIN)&&persist_exists(PERSIST_KEY_SOLAR_SYNC_AT)){
-    time_t now=time(NULL);
-    int32_t sync=persist_read_int(PERSIST_KEY_SOLAR_SYNC_AT);
-    if(now>=sync&&now-sync<=72*60*60){
-      int rise=persist_read_int(PERSIST_KEY_SUNRISE_MIN);
-      int set=persist_read_int(PERSIST_KEY_SUNSET_MIN);
-      struct tm *local=localtime(&now);
-      if(local&&rise>=0&&rise<1440&&set>rise&&set<1440){
-        int minute=local->tm_hour*60+local->tm_min;
-        s_theme_dark=minute<rise||minute>=set;
-      }
-    }
-  }
+  s_theme_dark = solar_theme_dark(s_theme_mode);
+  tick_timer_service_subscribe(MINUTE_UNIT, appearance_tick);
   controls_set_theme_mode(s_theme_mode);
   controls_apply_settings(s_large_text,s_theme_dark);
   ha_audio_init();
@@ -870,6 +849,7 @@ static void init() {
 }
 
 static void deinit() {
+  tick_timer_service_unsubscribe();
   if(s_dictation_send_timer)app_timer_cancel(s_dictation_send_timer);
   window_destroy(s_main_window);
   ha_audio_deinit();                

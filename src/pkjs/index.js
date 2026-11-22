@@ -10,82 +10,10 @@ var autoSend=localStorage.getItem('AUTO_SEND')!=='false';
 var enableTts=localStorage.getItem('ENABLE_TTS')!=='false';
 var fontChoice=localStorage.getItem('FONT_CHOICE')||((parseInt(localStorage.getItem('FONT_SIZE')||'24',10)>24)?'large':'normal');
 var themeMode=localStorage.getItem('HA_THEME_MODE')||'auto';
-var WEATHER_PLUGIN_UUID='7f7b6c10-93e0-4f4c-9237-7e8204c5a121';
-var weatherSource=null;
-var weatherSunrise=0,weatherSunset=0;
-var weatherUpdatedAt=0;
-try {
-  var weatherSaved=JSON.parse(localStorage.getItem('HA_WEATHER_SUN_V1')||'null');
-  if(weatherSaved&&Number(weatherSaved.savedAt)>Date.now()-72*3600*1000){
-    weatherSunrise=Number(weatherSaved.sunrise)||0;
-    weatherSunset=Number(weatherSaved.sunset)||0;
-    weatherUpdatedAt=Number(weatherSaved.savedAt)||0;
-  }
-}catch(e){}
-var themeDarkSent=null,settingsReady=false;
-function sunEpoch(v){
-  if(v&&v.timestamp&&v.timestamp.value!=null)v=v.timestamp.value;
-  var n=Number(v);
-  if(!isFinite(n)||n<1000000000)return 0;
-  return n>1e12?Math.floor(n/1000):Math.floor(n);
-}
-function effectiveThemeDark(){
-  if(themeMode==='night')return true;
-  if(themeMode==='day')return false;
-  // Reuse the local clock time of the last known sunrise/sunset for up to
-  // 72 hours, even across midnight. Do not compare today's clock directly
-  // with yesterday's epoch timestamps (that incorrectly forces Night).
-  // Date.setFullYear/setHours resolve DST changes using the phone timezone.
-  var nowMs=Date.now();
-  if(weatherSunrise>0&&weatherSunset>weatherSunrise&&
-     weatherUpdatedAt>0&&nowMs-weatherUpdatedAt>=0&&
-     nowMs-weatherUpdatedAt<72*3600*1000){
-    var sunriseThen=new Date(weatherSunrise*1000);
-    var sunsetThen=new Date(weatherSunset*1000);
-    var nowDate=new Date(nowMs);
-    function solarToday(source){
-      var today=new Date(nowDate.getTime());
-      today.setHours(source.getHours(),source.getMinutes(),source.getSeconds(),0);
-      return today.getTime();
-    }
-    var sunriseToday=solarToday(sunriseThen);
-    var sunsetToday=solarToday(sunsetThen);
-    if(sunsetToday>sunriseToday)
-      return nowMs<sunriseToday||nowMs>=sunsetToday;
-  }
-  // If Weather+ is disconnected for several days, retain the most recent
-  // evaluated appearance rather than force a bright Day screen at night.
-  return localStorage.getItem('HA_LAST_AUTO_DARK')==='true';
-}
-function onWeatherEnvelope(data){
-  var instances=data&&data.instances||[];
-  var props=instances[0]&&instances[0].properties||{};
-  var sunrise=sunEpoch(props.sunrise),sunset=sunEpoch(props.sunset);
-  if(!sunrise||!sunset||sunset<=sunrise)return;
-  weatherSunrise=sunrise;weatherSunset=sunset;weatherUpdatedAt=Date.now();
-  localStorage.setItem('HA_WEATHER_SUN_V1',JSON.stringify({
-    sunrise:sunrise,sunset:sunset,savedAt:weatherUpdatedAt}));
-  localStorage.setItem('HA_LAST_AUTO_DARK',String(effectiveThemeDark()));
-  if(settingsReady&&effectiveThemeDark()!==themeDarkSent)sendWatchSettings(false);
-}
-function weatherSubscribe(){
-  if(themeMode!=='auto'||typeof Pebble.subscribeToSource!=='function')return;
-  if(weatherSource)return;
-  try{
-    weatherSource=Pebble.subscribeToSource({
-      category:'weather',item:'location',plugin:WEATHER_PLUGIN_UUID,
-      properties:['sunrise','sunset','updated_at'],
-      onData:onWeatherEnvelope,
-      onError:function(e){console.log('Weather+ auto theme unavailable: '+String(e&&e.code||'source error'));}
-    });
-  }catch(e){console.log('Weather+ subscription unavailable: '+String(e&&e.message||e));}
-}
-function weatherStop(){
-  if(weatherSource&&typeof weatherSource.unsubscribe==='function')weatherSource.unsubscribe();
-  weatherSource=null;
-}
-function updateWeatherSubscription(){
-  if(themeMode==='auto')weatherSubscribe();else weatherStop();
+var weatherTheme;
+function updateWeatherSubscription() {
+  if (!weatherTheme) weatherTheme = require('./theme-weather').create(Pebble, require('message_keys'));
+  weatherTheme.setAuto(themeMode === 'auto');
 }
 
 var conversationId=localStorage.getItem('HA_CONVERSATION_ID')||'';
@@ -134,7 +62,7 @@ var clayConfig=[
     {type:'select',messageKey:'THEME_MODE',label:'Theme',
       defaultValue:themeMode,
       options:[{label:'Day',value:'day'},{label:'Night',value:'night'},
-        {label:'Auto (Weather+)',value:'auto'}]},
+        {label:'Auto',value:'auto'}]},
     {type:'select',messageKey:'HAPTIC_LEVEL',label:'Vibration feedback',
       defaultValue:hapticLevel,
       options:[{label:'Off',value:'off'},{label:'Low',value:'low'},
@@ -452,24 +380,10 @@ Pebble.addEventListener('showConfiguration',function(){
   });
 });
 function sendWatchSettings(preview){
-  var dark=effectiveThemeDark();
-  themeDarkSent=dark;
-  if(themeMode==='auto'&&weatherSunrise&&weatherSunset)
-    localStorage.setItem('HA_LAST_AUTO_DARK',String(dark));
   var message={COMMAND:'SETTINGS',FONT_SIZE:fontChoice==='large'?28:24,
     THEME_MODE_CODE:themeMode==='night'?1:themeMode==='day'?0:2,
-    LARGE_TEXT:fontChoice==='large'?1:0,THEME_DARK:dark?1:0,
+    LARGE_TEXT:fontChoice==='large'?1:0,
     AUTO_SEND:autoSend?1:0,HAPTIC_LEVEL:hapticValues[hapticLevel]||0};
-  // Send clock minutes rather than yesterday's epoch. The watch saves these
-  // locally and can determine Auto appearance before PebbleKit starts.
-  var age=Date.now()-weatherUpdatedAt;
-  if(weatherSunrise>0&&weatherSunset>weatherSunrise&&
-     age>=0&&age<72*3600*1000){
-    var rise=new Date(weatherSunrise*1000),set=new Date(weatherSunset*1000);
-    message.THEME_SUNRISE_MIN=rise.getHours()*60+rise.getMinutes();
-    message.THEME_SUNSET_MIN=set.getHours()*60+set.getMinutes();
-    message.THEME_SOLAR_SYNC_AT=Math.floor(Date.now()/1000);
-  }
   Pebble.sendAppMessage(message,
     function(){
       if(preview)Pebble.sendAppMessage({COMMAND:'HAPTIC_PREVIEW',
@@ -547,14 +461,8 @@ Pebble.addEventListener('webviewclosed',function(e){
   sendWatchSettings(false);
 });
 Pebble.addEventListener('ready',function(){
-  settingsReady=true;
   sendWatchSettings(false);
   updateWeatherSubscription();
-  // Check for sunrise/sunset transitions without refreshing the weather
-  // feed or redrawing the watch unnecessarily.
-  setInterval(function(){
-    if(themeMode==='auto'&&effectiveThemeDark()!==themeDarkSent)sendWatchSettings(false);
-  },15*60*1000);
 });
 function pluginAction(action,args){
   return Pebble.invokeAction({plugin:HA_PLUGIN_UUID,action:action,args:args});
