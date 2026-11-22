@@ -54,15 +54,21 @@ function valueBoolean(value,fallback){
 }
 var clayConfig=[
   {type:'heading',defaultValue:'Home Assistant AI'},
+  {type: 'section', items: [
+    {type: 'heading', defaultValue: 'Appearance'},
+    {type: 'select', messageKey: 'THEME_MODE', label: 'Theme', defaultValue: themeMode,
+      description: 'Auto follows sunrise and sunset. Without saved times, Day runs from 7 a.m. to 7 p.m.',
+      options: [
+        {label: 'Day', value: 'day'},
+        {label: 'Night', value: 'night'},
+        {label: 'Auto', value: 'auto'}
+      ]}
+  ]},
   {type:'section',items:[
     {type:'heading',defaultValue:'Display'},
     {type:'select',messageKey:'FONT_CHOICE',label:'Text size',
       defaultValue:fontChoice,
       options:[{label:'Normal',value:'normal'},{label:'Large',value:'large'}]},
-    {type:'select',messageKey:'THEME_MODE',label:'Theme',
-      defaultValue:themeMode,
-      options:[{label:'Day',value:'day'},{label:'Night',value:'night'},
-        {label:'Auto',value:'auto'}]},
     {type:'select',messageKey:'HAPTIC_LEVEL',label:'Vibration feedback',
       defaultValue:hapticLevel,
       options:[{label:'Off',value:'off'},{label:'Low',value:'low'},

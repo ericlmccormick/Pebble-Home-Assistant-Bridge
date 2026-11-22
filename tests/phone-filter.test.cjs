@@ -45,7 +45,7 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  handlers.showConfiguration();
  await flush();
  const config=clays[clays.length-1].cfg;
- const sec=config.filter(x=>x.type==='section')[2];
+ const sec=config.find(x=>x.type==='section' && x.items[0].defaultValue==='Watch devices');
  assert(!sec.items.some(x=>x.messageKey==='SHOW_ALL_DEVICES'),
    'Device type toggle is completely removed');
  const devices=sec.items.filter(x=>x.type==='checkboxgroup');

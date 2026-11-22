@@ -102,13 +102,14 @@ async function flush(){for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r)
   const cfg=h.configs[h.configs.length-1];
   const sections=cfg.filter(x=>x.type==='section');
   assert.strictEqual(sections.map(x=>x.items[0].defaultValue).join('|'),
-    'Display|Home Assistant Bridge|Watch devices');
-  const devices=sections[2].items.filter(x=>x.type==='checkboxgroup');
+    'Appearance|Display|Home Assistant Bridge|Watch devices');
+  const deviceSection=sections.find(x=>x.items[0].defaultValue==='Watch devices');
+  const devices=deviceSection.items.filter(x=>x.type==='checkboxgroup');
   assert.strictEqual(devices.length,97);
   assert.strictEqual(devices[96].messageKey,'DEV_96');
-  assert(!sections[2].items.some(x=>x.messageKey==='SHOW_ALL_DEVICES'),
+  assert(!deviceSection.items.some(x=>x.messageKey==='SHOW_ALL_DEVICES'),
     'Removed unreliable device type filter from phone settings');
-  assert(sections[2].items.filter(x=>x.type==='heading').length>=2,
+  assert(deviceSection.items.filter(x=>x.type==='heading').length>=2,
     'Keep room headings above devices');
   h.handlers.webviewclosed({response:encodeURIComponent(JSON.stringify({
     DEV_96:{value:[true,false]}
