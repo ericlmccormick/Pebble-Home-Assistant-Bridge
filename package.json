@@ -126,6 +126,6 @@
       }
     ]
   },
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Home Assistant Control Center for Pebble: room navigation, live device status and controls, scenes, secure door actions, and Home Assistant Assist voice using Home Assistant Bridge."
 }

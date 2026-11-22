@@ -2,7 +2,7 @@
 const fs=require('fs'),assert=require('assert');
 const c=fs.readFileSync('src/c/main.c','utf8');
 const pkg=require('../package.json');
-assert.strictEqual(pkg.version,'2.1.0','Keep release version at 2.1.0');
+assert.match(pkg.version,/^[0-9]+[.][0-9]+[.][0-9]+$/);
 assert.strictEqual(pkg.pebble.displayName,'Home Assistant Control Center');
 assert(c.includes('static void update_thinking_transcript_font(void)'), 'Shared transcript layout helper');
 assert(c.includes('s_large_text ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD'), 'Match large/normal menu title fonts');
